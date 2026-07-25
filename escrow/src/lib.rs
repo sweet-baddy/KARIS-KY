@@ -157,6 +157,12 @@ pub const MAX_DUST_SWEEP_AMOUNT: i128 = 100_000_000;
 /// Maximum UTF-8 byte length for the invoice `String` at init (matches Soroban [`Symbol`] max).
 pub const MAX_INVOICE_ID_STRING_LEN: u32 = 32;
 
+/// Upper bound on stored escrow lifecycle timeline events to keep persistent storage bounded.
+///
+/// Each state-mutating entrypoint appends a [`TimelineEvent`] so `get_event_timeline`
+/// can serve UI and audit-trail queries without off-chain event reconstruction.
+pub const MAX_TIMELINE_EVENTS: u32 = 10_000;
+
 /// Minimum instance storage TTL extension horizon for time-sensitive escrow entries.
 ///
 /// `bump_ttl` extends instance-storage entries to avoid rent/archival edge cases when
@@ -366,6 +372,9 @@ pub enum EscrowError {
     /// The contract's funding-token balance is less than `funded_amount` at withdraw time.
     /// Funds must be custodied in this contract before the SME can pull them.
     InsufficientContractBalance = 164,
+
+    /// Timeline event log is full; no more lifecycle events can be recorded.
+    TimelineCapacityReached = 170,
 }
 
 #[inline(always)]
@@ -492,6 +501,10 @@ pub enum DataKey {
     DistributedPrincipal,
     /// Optional funding deadline (ledger timestamp); after it passes, new funds are rejected.
     FundingDeadline,
+    /// Sequence index for the next [`TimelineEvent`] entry in the persistent timeline log.
+    TimelineEventCount,
+    /// One lifecycle event in the escrow timeline, keyed by sequential index.
+    TimelineEvent(u32),
 }
 
 // --- Data types ---
@@ -617,6 +630,41 @@ pub struct EscrowSummary {
     pub has_primary_attestation: bool,
     /// Number of entries in the attestation append log.
     pub attestation_log_length: u32,
+}
+
+// --- Timeline types ---
+
+/// Filter parameters for [`LiquifactEscrow::get_event_timeline`].
+///
+/// All fields are optional; `None` means "no filter" for that dimension.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimelineFilter {
+    /// When `Some`, only events whose `event_type` matches this symbol are returned.
+    pub event_type: Option<Symbol>,
+    /// When `Some`, only events with `timestamp >= from_timestamp` are returned.
+    pub from_timestamp: Option<u64>,
+    /// When `Some`, only events with `timestamp <= to_timestamp` are returned.
+    pub to_timestamp: Option<u64>,
+}
+
+/// One recorded lifecycle event for the escrow audit trail.
+///
+/// Stored in persistent storage under [`DataKey::TimelineEvent`] and enumerated
+/// by [`LiquifactEscrow::get_event_timeline`].
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimelineEvent {
+    /// Short routing symbol identifying the lifecycle action (e.g. `escrow_ii`, `funded`, `escrow_sd`).
+    pub event_type: Symbol,
+    /// Ledger timestamp when the event was recorded.
+    pub timestamp: u64,
+    /// Amount associated with the event in token base units (`0` when not applicable).
+    pub amount: i128,
+    /// Address that triggered the event (`G...` zero address when not applicable).
+    pub actor: Address,
+    /// Outcome symbol (`success` for normal completions, `skipped` for idempotent no-ops).
+    pub result: Symbol,
 }
 
 // --- Events ---
@@ -1158,6 +1206,14 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("escrow_ii"),
+            amount,
+            admin,
+            symbol_short!("success"),
+        );
+
         escrow
     }
 
@@ -1314,6 +1370,14 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("dust_sw"),
+            sweep_amt,
+            treasury,
+            symbol_short!("success"),
+        );
+
         sweep_amt
     }
 
@@ -1380,6 +1444,14 @@ impl LiquifactEscrow {
             new_sme: new_sme_address,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("ben_rot"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
 
         escrow
     }
@@ -1526,6 +1598,92 @@ impl LiquifactEscrow {
         }
     }
 
+    /// Append a lifecycle event to the persistent timeline log.
+    ///
+    /// Used internally by state-mutating entrypoints to build an on-chain audit trail
+    /// consumable via [`LiquifactEscrow::get_event_timeline`].
+    ///
+    /// # Errors
+    /// - [`EscrowError::TimelineCapacityReached`] when the log has reached [`MAX_TIMELINE_EVENTS`].
+    fn append_timeline_event(
+        env: &Env,
+        event_type: Symbol,
+        amount: i128,
+        actor: Address,
+        result: Symbol,
+    ) {
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TimelineEventCount)
+            .unwrap_or(0);
+        ensure(
+            env,
+            count < MAX_TIMELINE_EVENTS,
+            EscrowError::TimelineCapacityReached,
+        );
+        let event = TimelineEvent {
+            event_type,
+            timestamp: env.ledger().timestamp(),
+            amount,
+            actor,
+            result,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::TimelineEvent(count), &event);
+        env.storage()
+            .instance()
+            .set(&DataKey::TimelineEventCount, &(count + 1));
+    }
+
+    /// Return the escrow lifecycle timeline, optionally filtered by event type or date range.
+    ///
+    /// Events are recorded in persistent storage by state-mutating entrypoints and are
+    /// returned in chronological order (index order). Missing entries are skipped so the
+    /// timeline remains readable even if some entries were pruned by the host.
+    ///
+    /// # Parameters
+    /// - `filter`: [`TimelineFilter`] with optional `event_type`, `from_timestamp`, and `to_timestamp`.
+    ///
+    /// # Returns
+    /// `Vec<TimelineEvent>` containing all matching events in ascending timestamp order.
+    pub fn get_event_timeline(env: Env, filter: TimelineFilter) -> Vec<TimelineEvent> {
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TimelineEventCount)
+            .unwrap_or(0);
+        let mut out = Vec::new(&env);
+        for i in 0..count {
+            let event: TimelineEvent = match env
+                .storage()
+                .persistent()
+                .get(&DataKey::TimelineEvent(i))
+            {
+                Some(e) => e,
+                None => continue,
+            };
+            if let Some(ref ft) = filter.event_type {
+                if event.event_type != *ft {
+                    continue;
+                }
+            }
+            if let Some(from) = filter.from_timestamp {
+                if event.timestamp < from {
+                    continue;
+                }
+            }
+            if let Some(to) = filter.to_timestamp {
+                if event.timestamp > to {
+                    continue;
+                }
+            }
+            out.push_back(event);
+        }
+        out
+    }
+
     /// Bind a **primary** 32-byte digest (e.g. SHA-256 of an IPFS CID or document bundle). **Single-set:**
     /// the call succeeds only while no primary hash exists; use [`LiquifactEscrow::append_attestation_digest`]
     /// for an append-only audit trail.
@@ -1554,6 +1712,14 @@ impl LiquifactEscrow {
             digest: digest.clone(),
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("att_bind"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
     }
 
     pub fn get_primary_attestation_hash(env: Env) -> Option<BytesN<32>> {
@@ -1593,6 +1759,14 @@ impl LiquifactEscrow {
             digest,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("att_app"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
     }
 
     pub fn get_attestation_append_log(env: Env) -> Vec<BytesN<32>> {
@@ -1718,6 +1892,14 @@ impl LiquifactEscrow {
             index,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("att_rev"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
     }
 
     pub fn is_attestation_revoked(env: Env, index: u32) -> bool {
@@ -1798,6 +1980,14 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("coll_rec"),
+            amount,
+            escrow.sme_address.clone(),
+            symbol_short!("success"),
+        );
+
         commitment
     }
 
@@ -1846,6 +2036,14 @@ impl LiquifactEscrow {
             active: if active { 1 } else { 0 },
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("legalhld"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
     }
 
     /// Schedule a compliance hold clear window. The current admin must authorize.
@@ -1880,6 +2078,14 @@ impl LiquifactEscrow {
             clearable_at,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("lh_req"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
     }
 
     /// Enable or disable the investor allowlist. When enabled, only addresses with
@@ -1895,6 +2101,14 @@ impl LiquifactEscrow {
             active: if active { 1 } else { 0 },
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("al_ena"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
     }
 
     pub fn is_allowlist_active(env: Env) -> bool {
@@ -1918,6 +2132,14 @@ impl LiquifactEscrow {
             allowed: if allowed { 1 } else { 0 },
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("al_set"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
     }
 
     /// Batch add or remove investors from the allowlist.
@@ -1957,6 +2179,13 @@ impl LiquifactEscrow {
                 allowed: if allowed { 1 } else { 0 },
             }
             .publish(&env);
+            Self::append_timeline_event(
+                &env,
+                symbol_short!("al_set"),
+                0,
+                escrow.admin.clone(),
+                symbol_short!("success"),
+            );
         }
     }
 
@@ -1995,6 +2224,14 @@ impl LiquifactEscrow {
             new_target,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("fund_tgt"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
 
         escrow
     }
@@ -2045,6 +2282,14 @@ impl LiquifactEscrow {
             new_cap,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("inv_cap"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
 
         new_cap
     }
@@ -2143,6 +2388,14 @@ impl LiquifactEscrow {
             new_wasm_hash: new_wasm_hash.clone(),
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("upgrade"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
 
         // Replace contract WASM — no state is modified
         env.deployer().update_current_contract_wasm(new_wasm_hash);
@@ -2414,6 +2667,14 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("funded"),
+            amount,
+            investor,
+            symbol_short!("success"),
+        );
+
         escrow
     }
 
@@ -2474,6 +2735,14 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("part_set"),
+            escrow.funded_amount,
+            caller,
+            symbol_short!("success"),
+        );
+
         escrow
     }
 
@@ -2511,6 +2780,14 @@ impl LiquifactEscrow {
             settled_at_ledger_timestamp: now,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("escrow_sd"),
+            escrow.funded_amount,
+            escrow.sme_address.clone(),
+            symbol_short!("success"),
+        );
 
         escrow
     }
@@ -2593,6 +2870,14 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("sme_wd"),
+            amount,
+            escrow.sme_address.clone(),
+            symbol_short!("success"),
+        );
+
         escrow
     }
 
@@ -2663,6 +2948,14 @@ impl LiquifactEscrow {
             invoice_id: escrow.invoice_id.clone(),
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("inv_claim"),
+            0,
+            investor,
+            symbol_short!("success"),
+        );
     }
 
     /// On-chain read-only pro-rata gross payout for `investor`.
@@ -2765,6 +3058,14 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("maturity"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
+
         escrow
     }
 
@@ -2851,6 +3152,14 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("adm_prop"),
+            0,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
+
         new_admin
     }
 
@@ -2877,6 +3186,14 @@ impl LiquifactEscrow {
             new_admin: pending,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("admin"),
+            0,
+            pending.clone(),
+            symbol_short!("success"),
+        );
 
         escrow
     }
@@ -2920,6 +3237,14 @@ impl LiquifactEscrow {
             funded_amount: escrow.funded_amount,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("fund_can"),
+            escrow.funded_amount,
+            escrow.admin.clone(),
+            symbol_short!("success"),
+        );
 
         escrow
     }
@@ -2977,6 +3302,14 @@ impl LiquifactEscrow {
             amount,
         }
         .publish(&env);
+
+        Self::append_timeline_event(
+            &env,
+            symbol_short!("refunded"),
+            amount,
+            investor,
+            symbol_short!("success"),
+        );
     }
 
     /// Whether an investor has already received a refund in a cancelled escrow.
