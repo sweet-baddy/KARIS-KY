@@ -48,7 +48,7 @@ pub struct EscrowHealthWarning {
 | 4001 | `LowFundingRatio` | `funded_ratio_bps < 5000` (< 50%) when open or any status |
 | 4002 | `CloseToMaturity` | `0 < time_to_maturity_secs < 86400` (< 1 day) with healthy funding |
 | 4003 | `OverMaturity` | `time_to_maturity_secs < 0` and `status == 0` (open) and `unfunded` |
-| 4004 | `FundingStalled` | Reserved for future use (no deposits in extended period) |
+| 4004 | `FundingClosedAfterMaturity` | `closed_at_ledger_timestamp >= maturity` (snapshot after maturity date; BUG-013) |
 | 0 | No warning | Default / no risk condition detected |
 
 ### 3. Health Computation Logic

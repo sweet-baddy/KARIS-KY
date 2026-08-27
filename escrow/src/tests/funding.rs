@@ -3629,3 +3629,246 @@ fn test_206_zero_yield_two_investors_pro_rata() {
     assert_eq!(payout_a, half, "inv_a payout must equal contribution with zero yield");
     assert_eq!(payout_b, half, "inv_b payout must equal contribution with zero yield");
 }
+
+
+/// BUG-013: Test that FundingCloseSnapshot emits a warning when snapshot timestamp >= maturity_date.
+/// This test verifies the fix for the issue where funding closes after the invoice maturity date,
+/// which creates a logically inconsistent state. The fix emits EscrowHealthWarning with type 4004.
+#[test]
+fn test_funding_close_snapshot_validates_against_maturity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let target = 100_000_000_000i128;
+
+    // Get current ledger timestamp
+    let now = env.ledger().timestamp();
+
+    // Set maturity to a past time (5000 seconds ago) to simulate misconfigured time or fast ledger
+    let maturity_in_past = now.saturating_sub(5000);
+
+    // Initialize escrow with maturity in the past
+    client.init(
+        &admin,
+        &String::from_str(&env, "BUG013"),
+        &sme,
+        &target,
+        &800i64,
+        &maturity_in_past,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund to reach the target—this should create FundingCloseSnapshot with current timestamp
+    // which is >= maturity, triggering the warning.
+    client.fund(&investor, &target);
+
+    // Verify escrow transitioned to funded status
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 1, "Escrow should be funded after reaching target");
+
+    // Check the health metrics to verify warning was emitted
+    let (warning_type, funded_ratio_bps, time_to_maturity_secs) = client.check_escrow_health();
+
+    assert_eq!(
+        warning_type, 4004,
+        "Snapshot after maturity should emit warning type 4004 (FundingClosedAfterMaturity)"
+    );
+    assert_eq!(
+        funded_ratio_bps, 10000,
+        "Funded ratio should be 10000 bps (100%)"
+    );
+    assert!(
+        time_to_maturity_secs < 0,
+        "Time to maturity should be negative (in the past)"
+    );
+}
+
+/// BUG-013: Test that partial_settle also validates FundingCloseSnapshot against maturity.
+/// This verifies the warning is emitted in both fund_impl and partial_settle code paths.
+#[test]
+fn test_partial_settle_close_snapshot_validates_against_maturity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let target = 100_000_000_000i128;
+    let half_target = target / 2;
+
+    // Get current ledger timestamp
+    let now = env.ledger().timestamp();
+
+    // Set maturity to a past time
+    let maturity_in_past = now.saturating_sub(3000);
+
+    // Initialize escrow with maturity in the past
+    client.init(
+        &admin,
+        &String::from_str(&env, "BUG013B"),
+        &sme,
+        &target,
+        &800i64,
+        &maturity_in_past,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund only half the target (escrow stays in open status)
+    client.fund(&investor, &half_target);
+
+    // Verify escrow is still open
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 0, "Escrow should be open after partial funding");
+
+    // Call partial_settle to transition to funded early
+    // This also creates a FundingCloseSnapshot
+    client.partial_settle();
+
+    // Verify escrow transitioned to funded status
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 1, "Escrow should be funded after partial_settle");
+
+    // Check the health metrics to verify warning was emitted
+    let (warning_type, funded_ratio_bps, time_to_maturity_secs) = client.check_escrow_health();
+
+    assert_eq!(
+        warning_type, 4004,
+        "Snapshot after maturity (partial_settle) should emit warning type 4004"
+    );
+    assert!(funded_ratio_bps < 10000, "Funded ratio should be less than 100%");
+    assert!(
+        time_to_maturity_secs < 0,
+        "Time to maturity should be negative (in the past)"
+    );
+}
+
+/// BUG-013: Test that no warning is emitted when snapshot timestamp < maturity.
+/// This is the happy path—funding closes before maturity should not emit warning 4004.
+#[test]
+fn test_funding_close_snapshot_before_maturity_no_warning() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let target = 100_000_000_000i128;
+
+    // Get current ledger timestamp
+    let now = env.ledger().timestamp();
+
+    // Set maturity to a future time (10000 seconds in the future)
+    let maturity_in_future = now.saturating_add(10000);
+
+    // Initialize escrow with maturity in the future
+    client.init(
+        &admin,
+        &String::from_str(&env, "BUG013C"),
+        &sme,
+        &target,
+        &800i64,
+        &maturity_in_future,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund to reach the target—this should create FundingCloseSnapshot with current timestamp
+    // which is < maturity, so no warning 4004 should be emitted.
+    client.fund(&investor, &target);
+
+    // Verify escrow transitioned to funded status
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 1, "Escrow should be funded after reaching target");
+
+    // Check the health metrics
+    let (warning_type, funded_ratio_bps, time_to_maturity_secs) = client.check_escrow_health();
+
+    // With 100% funding and maturity in future, no warning should be emitted (warning_type should be 0)
+    assert_eq!(
+        warning_type, 0,
+        "No warning should be emitted when snapshot is before maturity"
+    );
+    assert_eq!(
+        funded_ratio_bps, 10000,
+        "Funded ratio should be 10000 bps (100%)"
+    );
+    assert!(
+        time_to_maturity_secs > 0,
+        "Time to maturity should be positive (in the future)"
+    );
+}
+
+/// BUG-013: Test with zero maturity (no maturity constraint) — should not emit warning.
+/// When maturity is 0, there's no maturity date to validate against.
+#[test]
+fn test_funding_close_snapshot_no_maturity_constraint() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let target = 100_000_000_000i128;
+
+    // Initialize escrow with maturity = 0 (no maturity constraint)
+    client.init(
+        &admin,
+        &String::from_str(&env, "BUG013D"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64, // No maturity
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund to reach the target
+    client.fund(&investor, &target);
+
+    // Verify escrow transitioned to funded status
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 1, "Escrow should be funded after reaching target");
+
+    // Check the health metrics
+    let (warning_type, funded_ratio_bps, time_to_maturity_secs) = client.check_escrow_health();
+
+    // With maturity = 0 and 100% funding, no warning 4004 should be emitted
+    assert_eq!(
+        warning_type, 0,
+        "No warning should be emitted when maturity is 0 (no constraint)"
+    );
+    assert_eq!(funded_ratio_bps, 10000, "Funded ratio should be 10000 bps (100%)");
+    assert_eq!(
+        time_to_maturity_secs, i64::MAX,
+        "Time to maturity should be i64::MAX when no maturity constraint"
+    );
+}
