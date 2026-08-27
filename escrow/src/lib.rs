@@ -508,6 +508,8 @@ pub enum EscrowError {
     ReinvestAmountNotPositive = 183,
     /// The investor does not hold enough accrued yield in the source escrow to complete the reinvestment.
     ReinvestYieldInsufficient = 184,
+    /// [`LiquifactEscrow::withdraw`] called by a caller that is not the registered SME address.
+    UnauthorizedWithdrawer = 185,
 }
 
 #[inline(always)]
@@ -6075,7 +6077,7 @@ impl LiquifactEscrow {
     /// # Guard ordering
     ///
     /// 1. Legal-hold gate (read-only).
-    /// 2. `sme_address.require_auth()` (via `load_escrow_require_sme`).
+    /// 2. `sme_address.require_auth()` and verify caller == sme_address.
     /// 3. Status == 1 (funded) check.
     /// 4. Contract balance sufficiency check ([`EscrowError::InsufficientContractBalance`]).
     /// 5. Status transition to 3, `DistributedPrincipal` update, storage write.
@@ -6088,7 +6090,7 @@ impl LiquifactEscrow {
     /// - [`EscrowError::InsufficientContractBalance`] — contract holds less than `funded_amount`.
 
 
-    pub fn withdraw(env: Env) -> InvoiceEscrow {
+    pub fn withdraw(env: Env, caller: Address) -> InvoiceEscrow {
         ensure(
             &env,
             !Self::legal_hold_active(&env),
@@ -6100,7 +6102,15 @@ impl LiquifactEscrow {
             EscrowError::DisputePausedBlocksWithdrawal,
         );
 
-        let mut escrow = Self::load_escrow_require_sme(&env);
+        caller.require_auth();
+        let mut escrow = Self::get_escrow(env.clone());
+
+        // Verify that the caller is the registered SME address
+        ensure(
+            &env,
+            caller == escrow.sme_address,
+            EscrowError::UnauthorizedWithdrawer,
+        );
 
         ensure(&env, escrow.status == 1, EscrowError::WithdrawalNotFunded);
 

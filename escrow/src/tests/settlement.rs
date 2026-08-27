@@ -108,9 +108,9 @@ fn settle_escrow(client: &super::LiquifactEscrowClient<'_>, env: &Env) -> Addres
 fn withdraw_sets_status_to_three() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _sme, _sac) = setup_funded_with_token(&env);
+    let (client, sme, _sac) = setup_funded_with_token(&env);
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     let escrow = client.get_escrow();
     assert_eq!(
@@ -131,10 +131,25 @@ fn withdraw_requires_sme_auth() {
 
     // Passes because test env mocks all auth. The assertion is on the *call*
     // succeeding for the correct signer (sme), not an impostor.
-    client.withdraw();
+    client.withdraw(&_sme);
 
     // Verify state changed — confirming it was sme who triggered the path.
     assert_eq!(client.get_escrow().status, 3u32);
+}
+
+/// `withdraw` must be rejected if called by an address other than the registered SME.
+#[test]
+#[should_panic]
+fn withdraw_rejects_wrong_caller() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, sme, _sac) = setup_funded_with_token(&env);
+
+    // Generate a different address (not the SME)
+    let impostor = Address::generate(&env);
+    
+    // This should panic because impostor != sme
+    client.withdraw(&impostor);
 }
 
 /// After `withdraw` the funded_amount and funding_target remain intact —
@@ -143,9 +158,9 @@ fn withdraw_requires_sme_auth() {
 fn withdraw_preserves_accounting_fields() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _sme, _sac) = setup_funded_with_token(&env);
+    let (client, sme, _sac) = setup_funded_with_token(&env);
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     let escrow = client.get_escrow();
     assert_eq!(
@@ -163,9 +178,9 @@ fn withdraw_preserves_accounting_fields() {
 fn withdraw_emits_event() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _sme, _sac) = setup_funded_with_token(&env);
+    let (client, sme, _sac) = setup_funded_with_token(&env);
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     // At least one event must be emitted in the transaction.
     let contract_events = env.events().all();
@@ -190,7 +205,7 @@ fn withdraw_on_open_escrow_panics() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     // No funding — status is still 0.
-    client.withdraw();
+    client.withdraw(&sme);
 }
 
 /// `withdraw` on an already-settled (status 2) escrow must panic.
@@ -205,7 +220,7 @@ fn withdraw_on_settled_escrow_panics() {
     default_init(&client, &env, &admin, &sme);
     settle_escrow(&client, &env);
     // status == 2 — withdraw must be rejected.
-    client.withdraw();
+    client.withdraw(&sme);
 }
 
 /// `withdraw` called twice on the same escrow must panic on the second call.
@@ -217,10 +232,10 @@ fn withdraw_on_settled_escrow_panics() {
 fn withdraw_twice_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _sme, _sac) = setup_funded_with_token(&env);
+    let (client, sme, _sac) = setup_funded_with_token(&env);
 
-    client.withdraw(); // first call — succeeds, status → 3
-    client.withdraw(); // second call — must panic (status == 3, not 1)
+    client.withdraw(&sme); // first call — succeeds, status → 3
+    client.withdraw(&sme); // second call — must panic (status == 3, not 1)
 }
 
 /// `settle` cannot be called after `withdraw` (status 3 is terminal).
@@ -229,8 +244,8 @@ fn withdraw_twice_panics() {
 fn settle_after_withdraw_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _sme, _sac) = setup_funded_with_token(&env);
-    client.withdraw(); // status → 3
+    let (client, sme, _sac) = setup_funded_with_token(&env);
+    client.withdraw(&sme); // status → 3
     client.settle(); // must panic — settle requires status == 1
 }
 
@@ -240,8 +255,8 @@ fn settle_after_withdraw_panics() {
 fn fund_after_withdraw_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _sme, _sac) = setup_funded_with_token(&env);
-    client.withdraw(); // status → 3
+    let (client, sme, _sac) = setup_funded_with_token(&env);
+    client.withdraw(&sme); // status → 3
     let late_investor = Address::generate(&env);
     client.fund(&late_investor, &10_000_000_000_i128); // must panic — fund requires status == 0
 }
@@ -263,7 +278,7 @@ fn withdraw_blocked_by_legal_hold() {
 
     client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     // Status is 1 but hold is active — must panic.
-    client.withdraw();
+    client.withdraw(&sme);
 }
 
 /// `withdraw` must succeed after a legal hold is cleared.
@@ -274,12 +289,12 @@ fn withdraw_blocked_by_legal_hold() {
 fn withdraw_succeeds_after_hold_cleared() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _sme, _sac) = setup_funded_with_token(&env);
+    let (client, sme, _sac) = setup_funded_with_token(&env);
 
     client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     client.set_legal_hold(&false, &String::from_str(&env, ""));
 
-    client.withdraw();
+    client.withdraw(&sme);
     assert_eq!(client.get_escrow().status, 3u32);
 }
 
@@ -837,7 +852,7 @@ fn settle_on_withdrawn_escrow_panics() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     fund_to_target(&client, &env);
-    client.withdraw(); // status → 3
+    client.withdraw(&sme); // status → 3
     client.settle();
 }
 
@@ -1061,7 +1076,7 @@ fn test_sweep_terminal_dust_after_withdraw_and_ledger_tick() {
     );
     let investor = Address::generate(&env);
     client.fund(&investor, &1_000i128);
-    client.withdraw();
+    client.withdraw(&sme);
 
     env.ledger()
         .set_sequence_number(env.ledger().sequence() + 10);
@@ -1302,7 +1317,7 @@ fn funding_snapshot_survives_withdraw() {
     let snapshot_before = client
         .get_funding_close_snapshot()
         .expect("snapshot exists after fund close");
-    client.withdraw();
+    client.withdraw(&sme);
     let snapshot_after = client
         .get_funding_close_snapshot()
         .expect("snapshot persists after withdraw");
@@ -1613,7 +1628,7 @@ fn investor_contribution_readable_after_withdraw() {
     let investor = Address::generate(&env);
     let contribution: i128 = TARGET;
     client.fund(&investor, &contribution);
-    client.withdraw();
+    client.withdraw(&sme);
 
     let recorded = client.get_contribution(&investor);
     assert_eq!(
@@ -1636,7 +1651,7 @@ fn multi_investor_contributions_preserved_after_withdraw() {
     client.fund(&inv_a, &half);
     client.fund(&inv_b, &(TARGET - half));
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     assert_eq!(client.get_contribution(&inv_a), half);
     assert_eq!(client.get_contribution(&inv_b), TARGET - half);
@@ -1659,7 +1674,7 @@ fn no_state_mutation_possible_after_withdraw() {
         let (client, admin, sme) = setup(&env);
         default_init(&client, &env, &admin, &sme);
         fund_to_target(&client, &env);
-        client.withdraw();
+        client.withdraw(&sme);
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.settle();
         }));
@@ -1672,9 +1687,9 @@ fn no_state_mutation_possible_after_withdraw() {
         let (client, admin, sme) = setup(&env);
         default_init(&client, &env, &admin, &sme);
         fund_to_target(&client, &env);
-        client.withdraw();
+        client.withdraw(&sme);
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.withdraw();
+            client.withdraw(&sme);
         }));
         assert!(r.is_err(), "withdraw after withdraw must panic");
     }
@@ -1685,7 +1700,7 @@ fn no_state_mutation_possible_after_withdraw() {
         let (client, admin, sme) = setup(&env);
         default_init(&client, &env, &admin, &sme);
         fund_to_target(&client, &env);
-        client.withdraw();
+        client.withdraw(&sme);
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let late = Address::generate(&env);
             client.fund(&late, &10_000_000_000_i128);

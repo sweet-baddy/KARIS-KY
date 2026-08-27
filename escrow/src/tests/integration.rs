@@ -993,7 +993,7 @@ fn withdraw_transfers_funded_amount_to_sme() {
         "escrow must hold exactly funded_amount before withdraw"
     );
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     let sme_after = token.balance(&sme);
     let contract_after = token.balance(&escrow_id);
@@ -1021,9 +1021,9 @@ fn withdraw_updates_distributed_principal() {
     env.mock_all_auths();
 
     let target = 20_000_000i128;
-    let (client, _escrow_id, _token, _sme) = setup_withdraw_with_token(&env, target, "WD_DP001");
+    let (client, _escrow_id, _token, sme) = setup_withdraw_with_token(&env, target, "WD_DP001");
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     // DistributedPrincipal is internal storage — verify indirectly via the
     // dust-sweep liability floor.  After disbursement the outstanding liability
@@ -1042,11 +1042,11 @@ fn withdraw_blocked_by_legal_hold_integration() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (client, _escrow_id, _token, _sme) =
+    let (client, _escrow_id, _token, sme) =
         setup_withdraw_with_token(&env, 10_000_000i128, "WD_LH001");
 
     client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
-    client.withdraw(); // must panic: LegalHoldBlocksWithdrawal
+    client.withdraw(&sme); // must panic: LegalHoldBlocksWithdrawal
 }
 
 /// `withdraw` is rejected when escrow status is 0 (open / not yet funded).
@@ -1085,7 +1085,7 @@ fn withdraw_rejected_wrong_status_open() {
         &None,
     );
     // No funding — status is 0.
-    client.withdraw(); // must panic: WithdrawalNotFunded
+    client.withdraw(&sme); // must panic: WithdrawalNotFunded
 }
 
 /// `withdraw` is rejected when contract balance is less than `funded_amount`
@@ -1134,7 +1134,7 @@ fn withdraw_rejected_insufficient_contract_balance() {
     // Mint only half — contract balance < funded_amount.
     sac_admin.mint(&escrow_id, &(target / 2));
 
-    client.withdraw(); // must panic: InsufficientContractBalance
+    client.withdraw(&sme); // must panic: InsufficientContractBalance
 }
 
 /// A second `withdraw` call must be rejected (status already 3, not 1).
@@ -1144,11 +1144,11 @@ fn withdraw_double_withdraw_panics() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (client, _escrow_id, _token, _sme) =
+    let (client, _escrow_id, _token, sme) =
         setup_withdraw_with_token(&env, 10_000_000i128, "WD_DW001");
 
-    client.withdraw(); // succeeds — status → 3
-    client.withdraw(); // must panic: WithdrawalNotFunded (status == 3 != 1)
+    client.withdraw(&sme); // succeeds — status → 3
+    client.withdraw(&sme); // must panic: WithdrawalNotFunded (status == 3 != 1)
 }
 
 /// `SmeWithdrew` event includes the correct recipient address.
@@ -1163,7 +1163,7 @@ fn withdraw_event_includes_recipient() {
     let target = 5_000_000i128;
     let (client, escrow_id, _token, sme) = setup_withdraw_with_token(&env, target, "WD_EV001");
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     let escrow = client.get_escrow();
 
