@@ -31,6 +31,7 @@ There is no timelock or automatic expiry — clearing always requires an explici
 - A hold can be applied at any lifecycle stage, including open (blocks new funding) and funded (blocks settlement and claims).
 - There is no "break glass" path outside of the admin key — operational recovery playbooks must live off-chain.
 - `LegalHoldChanged` event is emitted on every set/clear so indexers can reconstruct hold history.
+- **Terminal state guard (v7+):** As of schema version 7, `set_legal_hold` rejects escrows in terminal states (settled, withdrawn, cancelled, archived; status >= 2). This prevents misleading hold state on already-completed escrows where the hold cannot have operational effect.
 
 ## Rejected alternatives
 
