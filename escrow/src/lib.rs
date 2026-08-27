@@ -433,6 +433,8 @@ pub enum EscrowError {
     LegalHoldClearDelayOverflow = 152,
     /// Funding deadline has passed, new deposits are rejected.
     FundingDeadlinePassed = 153,
+    /// [`LiquifactEscrow::set_legal_hold`] called on an escrow in terminal status (settled, withdrawn, cancelled, or archived).
+    LegalHoldSetOnTerminalEscrow = 154,
 
     /// A legal hold blocks rotating the beneficiary (SME) address.
     LegalHoldBlocksBeneficiaryRotation = 160,
@@ -1868,6 +1870,28 @@ pub struct ErrorDiagnosticEmitted {
     pub message: String,
     pub recovery_action: String,
     pub context: Option<String>,
+}
+
+/// Emitted when [`LiquifactEscrow::migrate`] is called, providing version information
+/// for operator diagnostics even if the call ultimately fails.
+///
+/// This event is emitted before any typed error is returned, allowing off-chain tooling
+/// to surface version delta information and help operators understand schema compatibility.
+/// Schema event version = 1.
+#[contractevent]
+pub struct MigrationDiagnosticEmitted {
+    /// Event schema version for forward compatibility.
+    #[topic]
+    pub name: Symbol,
+    /// Escrow invoice identifier.
+    #[topic]
+    pub invoice_id: Symbol,
+    /// The version stored on-chain (from `DataKey::Version`).
+    pub stored_version: u32,
+    /// The version provided as a parameter to `migrate` (from_version).
+    pub from_version: u32,
+    /// The target schema version (SCHEMA_VERSION constant).
+    pub target_version: u32,
 }
 
 /// Emitted on admin transfer (acceptance) and admin proposal.
@@ -4319,6 +4343,14 @@ impl LiquifactEscrow {
     pub fn set_legal_hold(env: Env, active: bool, reason: String) {
         let escrow = Self::load_escrow_require_admin(&env);
 
+        // Check if escrow is in a terminal status (2, 3, 4, or 5)
+        // Terminal statuses: 2 = settled, 3 = withdrawn, 4 = cancelled, 5 = archived
+        ensure(
+            &env,
+            escrow.status < 2,
+            EscrowError::LegalHoldSetOnTerminalEscrow,
+        );
+
         // Validate reason length (max 256 bytes)
         ensure(
             &env,
@@ -4847,9 +4879,20 @@ impl LiquifactEscrow {
     /// See `docs/OPERATOR_RUNBOOK.md` §2 for step-by-step instructions on implementing
     /// a concrete migration path.
     pub fn migrate(env: Env, from_version: u32) -> u32 {
-        Self::load_escrow_require_admin(&env);
+        let escrow = Self::load_escrow_require_admin(&env);
 
         let stored: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
+
+        // Emit diagnostic event with version information for operator insight,
+        // even if the call will ultimately fail.
+        MigrationDiagnosticEmitted {
+            name: symbol_short!("mig_diag"),
+            invoice_id: escrow.invoice_id.clone(),
+            stored_version: stored,
+            from_version,
+            target_version: SCHEMA_VERSION,
+        }
+        .publish(&env);
 
         ensure(
             &env,
