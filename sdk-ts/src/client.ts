@@ -386,6 +386,27 @@ export class EscrowClient {
     return this.invoke("fund_batch", [entries], source);
   }
 
+  /**
+   * Batch fund multiple investors in a single atomic transaction (FEAT-001).
+   *
+   * Identical per-entry semantics to {@link fund} — each entry requires the investor's
+   * authorization and is validated against the same caps and allowlists. If any single
+   * entry fails the entire transaction reverts.
+   *
+   * Emits one {@code BatchFundCompleted} summary event after all entries succeed, in
+   * addition to the per-entry {@code EscrowFunded} / {@code FundReceived} events.
+   *
+   * @param contributions Array of [investor_address, amount] tuples; max 50 entries.
+   * @param source Optional source account for fee payment.
+   * @returns Updated {@link InvoiceEscrow} state.
+   */
+  async batchFund(
+    contributions: Array<[string, string]>,
+    source?: string,
+  ): Promise<InvoiceEscrow> {
+    return this.invoke("batch_fund", [contributions], source);
+  }
+
   /** Settle a funded escrow. Auth: sme_address. */
   async settle(source?: string): Promise<InvoiceEscrow> {
     return this.invoke("settle", [], source);

@@ -433,6 +433,8 @@ pub enum EscrowError {
     LegalHoldClearDelayOverflow = 152,
     /// Funding deadline has passed, new deposits are rejected.
     FundingDeadlinePassed = 153,
+    /// [`LiquifactEscrow::set_legal_hold`] called on an escrow in terminal status (settled, withdrawn, cancelled, or archived).
+    LegalHoldSetOnTerminalEscrow = 154,
 
     /// A legal hold blocks rotating the beneficiary (SME) address.
     LegalHoldBlocksBeneficiaryRotation = 160,
@@ -508,6 +510,8 @@ pub enum EscrowError {
     ReinvestAmountNotPositive = 183,
     /// The investor does not hold enough accrued yield in the source escrow to complete the reinvestment.
     ReinvestYieldInsufficient = 184,
+    /// [`LiquifactEscrow::withdraw`] called by a caller that is not the registered SME address.
+    UnauthorizedWithdrawer = 185,
 }
 
 #[inline(always)]
@@ -1136,6 +1140,30 @@ pub struct FundReceived {
     pub status: u32,
     pub investor_effective_yield_bps: i64,
     pub tier_lock_secs: u64,
+}
+
+/// Emitted once by [`LiquifactEscrow::batch_fund`] after all entries are successfully processed.
+///
+/// Provides a roll-up view of the entire batch: total principal credited and the number of
+/// distinct investor entries processed. Indexers and dashboards can use this event to
+/// reconcile batch submissions without scanning every individual [`EscrowFunded`] event.
+///
+/// Per-entry [`EscrowFunded`] and [`FundReceived`] events are still emitted by the underlying
+/// [`fund_impl`] for full per-investor audit coverage.
+#[contractevent]
+pub struct BatchFundCompleted {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Total principal credited across all entries in this batch (sum of all amounts).
+    pub total_funded_amount: i128,
+    /// Number of investor entries processed in this batch call.
+    pub investor_count: u32,
+    /// Final `funded_amount` stored in the escrow after the batch completes.
+    pub escrow_funded_amount: i128,
+    /// Final escrow status after the batch completes (`0` = open, `1` = funded).
+    pub status: u32,
 }
 
 /// Emitted by [`LiquifactEscrow::archive_escrow`] when a terminal escrow (settled, withdrawn,
@@ -1868,6 +1896,28 @@ pub struct ErrorDiagnosticEmitted {
     pub message: String,
     pub recovery_action: String,
     pub context: Option<String>,
+}
+
+/// Emitted when [`LiquifactEscrow::migrate`] is called, providing version information
+/// for operator diagnostics even if the call ultimately fails.
+///
+/// This event is emitted before any typed error is returned, allowing off-chain tooling
+/// to surface version delta information and help operators understand schema compatibility.
+/// Schema event version = 1.
+#[contractevent]
+pub struct MigrationDiagnosticEmitted {
+    /// Event schema version for forward compatibility.
+    #[topic]
+    pub name: Symbol,
+    /// Escrow invoice identifier.
+    #[topic]
+    pub invoice_id: Symbol,
+    /// The version stored on-chain (from `DataKey::Version`).
+    pub stored_version: u32,
+    /// The version provided as a parameter to `migrate` (from_version).
+    pub from_version: u32,
+    /// The target schema version (SCHEMA_VERSION constant).
+    pub target_version: u32,
 }
 
 /// Emitted on admin transfer (acceptance) and admin proposal.
@@ -4319,6 +4369,14 @@ impl LiquifactEscrow {
     pub fn set_legal_hold(env: Env, active: bool, reason: String) {
         let escrow = Self::load_escrow_require_admin(&env);
 
+        // Check if escrow is in a terminal status (2, 3, 4, or 5)
+        // Terminal statuses: 2 = settled, 3 = withdrawn, 4 = cancelled, 5 = archived
+        ensure(
+            &env,
+            escrow.status < 2,
+            EscrowError::LegalHoldSetOnTerminalEscrow,
+        );
+
         // Validate reason length (max 256 bytes)
         ensure(
             &env,
@@ -4847,9 +4905,20 @@ impl LiquifactEscrow {
     /// See `docs/OPERATOR_RUNBOOK.md` §2 for step-by-step instructions on implementing
     /// a concrete migration path.
     pub fn migrate(env: Env, from_version: u32) -> u32 {
-        Self::load_escrow_require_admin(&env);
+        let escrow = Self::load_escrow_require_admin(&env);
 
         let stored: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
+
+        // Emit diagnostic event with version information for operator insight,
+        // even if the call will ultimately fail.
+        MigrationDiagnosticEmitted {
+            name: symbol_short!("mig_diag"),
+            invoice_id: escrow.invoice_id.clone(),
+            stored_version: stored,
+            from_version,
+            target_version: SCHEMA_VERSION,
+        }
+        .publish(&env);
 
         ensure(
             &env,
@@ -5190,6 +5259,79 @@ impl LiquifactEscrow {
             // so we capture it for the next iteration.
             escrow = Self::fund_impl(env.clone(), investor, amount, true, 0);
         }
+
+        escrow
+    }
+
+    /// Batch funding entrypoint: record multiple investor principals in a single atomic call
+    /// and emit a [`BatchFundCompleted`] summary event when all entries succeed.
+    ///
+    /// This is the canonical FEAT-001 entrypoint. It differs from [`LiquifactEscrow::fund_batch`]
+    /// in one key way: after every entry is processed it emits a single `BatchFundCompleted` event
+    /// carrying the aggregate totals (`total_funded_amount` and `investor_count`), which lets
+    /// indexers reconcile a batch submission with a single event lookup rather than scanning all
+    /// individual per-entry [`EscrowFunded`] events.
+    ///
+    /// Each entry is processed sequentially with per-investor [`Address::require_auth()`].
+    /// All existing [`LiquifactEscrow::fund`] invariants (allowlist, caps, min contribution,
+    /// overflow guards) are enforced per entry. If any single entry fails its invariants the
+    /// entire transaction reverts atomically — no partial state is persisted.
+    ///
+    /// # Parameters
+    /// - `contributions`: `Vec<(Address, i128)>` of `(investor_address, amount)` tuples.
+    ///   Maximum [`MAX_FUND_BATCH`] (50) entries per call.
+    ///
+    /// # Returns
+    /// The updated [`InvoiceEscrow`] after all entries are applied.
+    ///
+    /// # Events
+    /// - Per entry: [`EscrowFunded`] + [`FundReceived`] (identical to single
+    ///   [`LiquifactEscrow::fund`] semantics, emitted inside [`fund_impl`]).
+    /// - Once, at end: [`BatchFundCompleted`] with aggregate totals.
+    ///
+    /// # Funded-target snapshot
+    /// If any entry causes the escrow to transition to **funded** (`status 0 → 1`),
+    /// [`DataKey::FundingCloseSnapshot`] is recorded exactly once. Remaining entries are
+    /// still processed after the transition (over-funding is allowed up to `funding_target`
+    /// per entry validation; exact semantics follow [`fund_impl`]).
+    ///
+    /// # Errors
+    /// - [`EscrowError::FundingBatchEmpty`] if `contributions` is empty.
+    /// - [`EscrowError::FundingBatchTooLarge`] if `contributions.len() > MAX_FUND_BATCH`.
+    /// - Per-entry: all errors from [`LiquifactEscrow::fund`] for that investor/amount pair.
+    pub fn batch_fund(env: Env, contributions: Vec<(Address, i128)>) -> InvoiceEscrow {
+        let n = contributions.len();
+
+        ensure(&env, n > 0, EscrowError::FundingBatchEmpty);
+        ensure(&env, n <= MAX_FUND_BATCH, EscrowError::FundingBatchTooLarge);
+
+        // Track how much principal this batch call contributes in total.
+        let funded_before: i128 = Self::get_escrow(env.clone()).funded_amount;
+
+        let mut escrow = Self::get_escrow(env.clone());
+        for i in 0..n {
+            let (investor, amount) = contributions.get(i).unwrap();
+            // fund_impl handles per-investor require_auth(), all validation, storage
+            // writes, per-entry events, and status transitions.
+            escrow = Self::fund_impl(env.clone(), investor, amount, true, 0);
+        }
+
+        // Total principal credited by this batch call.
+        let total_funded_amount = escrow
+            .funded_amount
+            .checked_sub(funded_before)
+            .unwrap_or(escrow.funded_amount);
+
+        // Emit the single batch-level summary event.
+        BatchFundCompleted {
+            name: symbol_short!("btch_fnd"),
+            invoice_id: escrow.invoice_id.clone(),
+            total_funded_amount,
+            investor_count: n,
+            escrow_funded_amount: escrow.funded_amount,
+            status: escrow.status,
+        }
+        .publish(&env);
 
         escrow
     }
@@ -6149,7 +6291,7 @@ impl LiquifactEscrow {
     /// # Guard ordering
     ///
     /// 1. Legal-hold gate (read-only).
-    /// 2. `sme_address.require_auth()` (via `load_escrow_require_sme`).
+    /// 2. `sme_address.require_auth()` and verify caller == sme_address.
     /// 3. Status == 1 (funded) check.
     /// 4. Contract balance sufficiency check ([`EscrowError::InsufficientContractBalance`]).
     /// 5. Status transition to 3, `DistributedPrincipal` update, storage write.
@@ -6162,7 +6304,7 @@ impl LiquifactEscrow {
     /// - [`EscrowError::InsufficientContractBalance`] — contract holds less than `funded_amount`.
 
 
-    pub fn withdraw(env: Env) -> InvoiceEscrow {
+    pub fn withdraw(env: Env, caller: Address) -> InvoiceEscrow {
         ensure(
             &env,
             !Self::legal_hold_active(&env),
@@ -6174,7 +6316,15 @@ impl LiquifactEscrow {
             EscrowError::DisputePausedBlocksWithdrawal,
         );
 
-        let mut escrow = Self::load_escrow_require_sme(&env);
+        caller.require_auth();
+        let mut escrow = Self::get_escrow(env.clone());
+
+        // Verify that the caller is the registered SME address
+        ensure(
+            &env,
+            caller == escrow.sme_address,
+            EscrowError::UnauthorizedWithdrawer,
+        );
 
         ensure(&env, escrow.status == 1, EscrowError::WithdrawalNotFunded);
 

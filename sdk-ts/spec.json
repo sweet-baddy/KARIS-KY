@@ -65,6 +65,15 @@
       "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state" }
     },
     {
+      "name": "batch_fund",
+      "description": "Atomic multi-investor funding in a single transaction (FEAT-001). Requires per-investor auth for each entry. Emits per-entry EscrowFunded/FundReceived events and one BatchFundCompleted summary event. Max 50 entries.",
+      "auth": "per-investor",
+      "params": [
+        { "name": "contributions", "type": "Vec<(Address, i128)>", "description": "Vector of (investor_address, amount) pairs; max 50. Each entry requires that investor's require_auth()." }
+      ],
+      "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state after all contributions are applied" }
+    },
+    {
       "name": "settle",
       "description": "Mark a funded escrow as settled (status funded→settled). SME auth required; maturity enforced.",
       "auth": "sme_address",
@@ -315,6 +324,8 @@
   "events": [
     { "name": "EscrowInitialized", "topics": ["name"], "description": "Emitted after successful init" },
     { "name": "EscrowFunded", "topics": ["name", "invoice_id", "investor"], "description": "Emitted on each fund/fund_with_commitment call" },
+    { "name": "FundReceived", "topics": ["name", "invoice_id", "actor"], "description": "Versioned counterpart to EscrowFunded carrying actor + timestamp" },
+    { "name": "BatchFundCompleted", "topics": ["name", "invoice_id"], "description": "Emitted once by batch_fund after all entries are processed; carries total_funded_amount, investor_count, escrow_funded_amount, and status" },
     { "name": "EscrowSettled", "topics": ["name", "invoice_id"], "description": "Emitted when settle succeeds" },
     { "name": "EscrowPartialSettle", "topics": ["name", "invoice_id"], "description": "Emitted when partial settlement is recorded" },
     { "name": "SmeWithdrew", "topics": ["name", "invoice_id"], "description": "Emitted when SME withdraws liquidity" },
