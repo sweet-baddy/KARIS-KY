@@ -424,9 +424,14 @@ fn test_record_collateral_stored_and_does_not_block_settle() {
         &None,
         &None,
     );
-    let c = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5000i128);
+    let c = client.record_sme_collateral_commitment(
+        &symbol_short!("USDC"),
+        &5000i128,
+        &soroban_sdk::String::from_str(&env, "equipment"),
+    );
     assert_eq!(c.amount, 5000i128);
     assert_eq!(c.asset, symbol_short!("USDC"));
+    assert_eq!(c.collateral_type, soroban_sdk::String::from_str(&env, "equipment"));
     assert_eq!(client.get_sme_collateral_commitment(), Some(c));
 
     client.fund(&investor, &TARGET);
@@ -458,7 +463,11 @@ fn test_collateral_zero_panics() {
         &None,
         &None,
     );
-    client.record_sme_collateral_commitment(&symbol_short!("XLM"), &0i128);
+    client.record_sme_collateral_commitment(
+        &symbol_short!("XLM"),
+        &0i128,
+        &soroban_sdk::String::from_str(&env, "property"),
+    );
 }
 
 #[test]
@@ -486,7 +495,42 @@ fn test_collateral_requires_sme_auth() {
         &None,
     );
     env.mock_auths(&[]);
-    client.record_sme_collateral_commitment(&symbol_short!("XLM"), &100i128);
+    client.record_sme_collateral_commitment(
+        &symbol_short!("XLM"),
+        &100i128,
+        &soroban_sdk::String::from_str(&env, "inventory"),
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_collateral_empty_type_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "COL004"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.record_sme_collateral_commitment(
+        &symbol_short!("XLM"),
+        &100i128,
+        &soroban_sdk::String::from_str(&env, ""),
+    );
 }
 
 #[test]

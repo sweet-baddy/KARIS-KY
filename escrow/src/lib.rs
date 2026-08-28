@@ -332,9 +332,8 @@ pub enum EscrowError {
     CollateralAssetEmpty = 61,
     /// [`LiquifactEscrow::record_sme_collateral_commitment`] received a timestamp before the stored record.
     CollateralTimestampBackwards = 62,
-    /// [`LiquifactEscrow::record_sme_collateral_commitment`] called after settlement; updates are not
-    /// permitted once the escrow has reached settled (2), withdrawn (3), or cancelled (4) status.
-    CollateralUpdateAfterSettlement = 63,
+    /// [`LiquifactEscrow::record_sme_collateral_commitment`] received an empty collateral_type string.
+    CollateralTypeEmpty = 63,
 
     /// [`LiquifactEscrow::set_investors_allowlisted`] received an empty batch.
     InvestorBatchEmpty = 70,
@@ -844,10 +843,8 @@ pub struct ComplianceReport {
 /// # Fields
 /// - `asset`: The off-chain asset symbol (cannot be empty).
 /// - `amount`: The reported collateral amount (must be positive).
-/// - `recorded_at`: The Soroban ledger timestamp when this record was **first** written. Immutable
-///   after the initial call; subsequent updates preserve this value.
-/// - `updated_at`: The Soroban ledger timestamp of the most recent write (including the initial
-///   write). Equals `recorded_at` when no update has occurred.
+/// - `recorded_at`: The Soroban ledger timestamp when this record was written.
+/// - `collateral_type`: A descriptive categorization of the collateral pledge (must be non-empty).
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 /// SME collateral commitment metadata (record-only).
@@ -876,18 +873,7 @@ pub struct SnapshotDelta {
     pub delta_id: u32,
     /// Ledger timestamp when this delta was recorded.
     pub recorded_at: u64,
-    /// Previous delta ID this one is based on (0 for baseline/first delta).
-    pub based_on_delta_id: u32,
-    /// Change in funded amount (signed; may be negative for reversals).
-    pub funded_amount_delta: i128,
-    /// New maturity value (0 if unchanged).
-    pub maturity: u64,
-    /// New status (255 if unchanged).
-    pub status: u32,
-    /// New admin address (None if unchanged).
-    pub admin: Option<Address>,
-    /// New SME/beneficiary address (None if unchanged).
-    pub sme_address: Option<Address>,
+    pub collateral_type: String,
 }
 
 /// One step in an optional tier ladder: investors who commit to at least `min_lock_secs` (on first
@@ -5339,49 +5325,46 @@ impl LiquifactEscrow {
         escrow
     }
 
-    fn fund_impl(
+    /// Record or replace the optional SME collateral commitment metadata.
+    ///
+    /// **Metadata-only:** this writes [`DataKey::SmeCollateralPledge`] and emits
+    /// [`CollateralRecordedEvt`]. It does not transfer tokens, reserve balances, verify custody,
+    /// create an on-chain encumbrance, or block any contract flows (such as settlement, withdrawals,
+    /// or claims).
+    ///
+    /// # Authorization
+    /// - Requires the signature of the configured SME (`InvoiceEscrow::sme_address`). Enforced via
+    ///   `sme_address.require_auth()` during execution.
+    ///
+    /// # Validation Rules
+    /// - **Positive Amount:** The `amount` parameter must be strictly positive (`amount > 0`).
+    /// - **Non-empty Asset Symbol:** The `asset` parameter must be a non-empty Symbol (not equal to `Symbol::new(&env, "")`).
+    /// - **Non-empty Collateral Type:** The `collateral_type` parameter must not be an empty string.
+    /// - **Monotonic Timestamp:** When replacing an existing commitment, the current ledger timestamp must not
+    ///   be earlier than the prior `recorded_at` value (`now >= prior.recorded_at`).
+    ///
+    /// # Errors
+    /// - [`EscrowError::CollateralAmountNotPositive`] if `amount <= 0`.
+    /// - [`EscrowError::CollateralAssetEmpty`] if `asset` is empty.
+    /// - [`EscrowError::CollateralTypeEmpty`] if `collateral_type` is empty.
+    /// - [`EscrowError::CollateralTimestampBackwards`] if the replacement timestamp is in the past.
+    /// - Standard uninitialized check via `load_escrow_require_sme`.
+    pub fn record_sme_collateral_commitment(
         env: Env,
         investor: Address,
         amount: i128,
-        simple_fund: bool,
-        committed_lock_secs: u64,
-    ) -> InvoiceEscrow {
-        investor.require_auth();
-
-        ensure(&env, amount > 0, EscrowError::FundingAmountNotPositive);
-
-        let floor: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::MinContributionFloor)
-            .unwrap_or(0);
-        if floor > 0 {
-            ensure(
-                &env,
-                amount >= floor,
-                EscrowError::FundingBelowMinContribution,
-            );
-        }
-
-        // env.clone(): env is used again after this call for storage writes and publish.
-        let mut escrow = Self::get_escrow(env.clone());
-        // Legal hold check is intentionally after the escrow read: the escrow is needed for
-        // status and yield_bps regardless, and hoisting the hold check before the escrow read
-        // would not reduce storage operations (both keys are always read on this path).
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksFunding,
-        );
-        ensure(
-            &env,
-            !Self::is_dispute_paused(&env),
-            EscrowError::DisputePausedBlocksFunding,
-        );
+        collateral_type: String,
+    ) -> SmeCollateralCommitment {
+        ensure(&env, amount > 0, EscrowError::CollateralAmountNotPositive);
         ensure(
             &env,
             escrow.status == 0,
             EscrowError::EscrowNotOpenForFunding,
+        );
+        ensure(
+            &env,
+            collateral_type.len() > 0,
+            EscrowError::CollateralTypeEmpty,
         );
 
         // Check funding deadline
@@ -5393,10 +5376,13 @@ impl LiquifactEscrow {
             );
         }
 
-        // ── Funding velocity auto-pause ──
-        // Check whether funding has been paused (auto or manual).
-        let funding_paused: bool = env
-            .storage()
+        let commitment = SmeCollateralCommitment {
+            asset,
+            amount,
+            recorded_at: now,
+            collateral_type,
+        };
+        env.storage()
             .instance()
             .get(&DataKey::FundingPaused)
             .unwrap_or(false);
