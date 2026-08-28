@@ -5183,6 +5183,258 @@ impl LiquifactEscrow {
         env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
+    /// Helper validation function that checks minimum contribution floor.
+    /// Returns true if valid, fails with EscrowError::FundingBelowMinContribution otherwise.
+    fn validate_contribution_amount(env: &Env, amount: i128) {
+        ensure(env, amount > 0, EscrowError::FundingAmountNotPositive);
+
+        let floor: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinContributionFloor)
+            .unwrap_or(0);
+        if floor > 0 {
+            ensure(
+                env,
+                amount >= floor,
+                EscrowError::FundingBelowMinContribution,
+            );
+        }
+    }
+
+    /// Core funding implementation shared by fund and fund_with_commitment.
+    /// 
+    /// # Parameters
+    /// - `simple_fund`: true for standard fund (non-tiered), false for fund_with_commitment (tiered)
+    /// - `committed_lock_secs`: lock duration in seconds (only used when simple_fund is false)
+    fn fund_impl(
+        env: Env,
+        investor: Address,
+        amount: i128,
+        simple_fund: bool,
+        committed_lock_secs: u64,
+    ) -> InvoiceEscrow {
+        investor.require_auth();
+
+        Self::validate_contribution_amount(&env, amount);
+
+        // env.clone(): env is used again after this call for storage writes and publish.
+        let mut escrow = Self::get_escrow(env.clone());
+        // Legal hold check is intentionally after the escrow read: the escrow is needed for
+        // status and yield_bps regardless, and hoisting the hold check before the escrow read
+        // would not reduce storage operations (both keys are always read on this path).
+        ensure(
+            &env,
+            !Self::legal_hold_active(&env),
+            EscrowError::LegalHoldBlocksFunding,
+        );
+        ensure(
+            &env,
+            escrow.status == 0,
+            EscrowError::EscrowNotOpenForFunding,
+        );
+
+        // Check funding deadline
+        if let Some(deadline) = env.storage().instance().get(&DataKey::FundingDeadline) {
+            ensure(
+                &env,
+                env.ledger().timestamp() <= deadline,
+                EscrowError::FundingDeadlinePassed,
+            );
+        }
+
+        if Self::is_allowlist_active(env.clone()) {
+            ensure(
+                &env,
+                Self::is_investor_allowlisted(env.clone(), investor.clone()),
+                EscrowError::InvestorNotAllowlisted,
+            );
+        }
+
+        // Sanctions screening: check investor against configured sanctions provider
+        Self::check_sanctions(&env, &investor);
+
+        // KYC gating: reject funding from unverified investors when a KYC registry is configured.
+        Self::check_kyc(&env, &investor);
+
+        let prev: i128 = Self::get_persistent_investor_contribution(&env, investor.clone());
+        let new_contribution: i128 = prev
+            .checked_add(amount)
+            .unwrap_or_else(|| fail(&env, EscrowError::InvestorContributionOverflow));
+
+        if let Some(cap) = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::MaxPerInvestorCap)
+        {
+            ensure(
+                &env,
+                new_contribution <= cap,
+                EscrowError::InvestorContributionExceedsCap,
+            );
+        }
+
+        // Hoist UniqueFunderCount read: used for both the cap assertion (below) and the
+        // increment write (after contribution is recorded). A single read covers both uses,
+        // eliminating one storage read on every new-investor funding call.
+        let cur_funder_count: u32 = if prev == 0 {
+            env.storage()
+                .instance()
+                .get(&DataKey::UniqueFunderCount)
+                .unwrap_or(0)
+        } else {
+            0 // prev != 0: count is not needed; skip the read entirely.
+        };
+
+        if prev == 0 {
+            if let Some(cap) = env
+                .storage()
+                .instance()
+                .get::<DataKey, u32>(&DataKey::MaxUniqueInvestorsCap)
+            {
+                ensure(
+                    &env,
+                    cur_funder_count < cap,
+                    EscrowError::UniqueInvestorCapReached,
+                );
+            }
+        }
+
+        // Capture the effective yield and tier lock threshold in locals so event fields can
+        // be populated without post-write storage reads.
+        let investor_effective_yield_bps: i64;
+        let tier_lock_secs: u64;
+
+        if simple_fund {
+            // Non-tiered deposits never carry a commitment lock.
+            tier_lock_secs = 0;
+            if prev == 0 {
+                investor_effective_yield_bps = escrow.yield_bps;
+                Self::set_persistent_investor_effective_yield(
+                    &env,
+                    investor.clone(),
+                    escrow.yield_bps,
+                );
+                Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
+            } else {
+                // Returning investor: yield was set on first deposit; read it for the event.
+                investor_effective_yield_bps =
+                    Self::get_persistent_investor_effective_yield(&env, investor.clone())
+                        .unwrap_or(escrow.yield_bps);
+            }
+            // If prev > 0, preserve existing effective yield and claim lock
+        } else {
+            ensure(&env, prev == 0, EscrowError::TieredSecondDeposit);
+            let (eff, lock) =
+                Self::effective_yield_for_commitment(&env, escrow.yield_bps, committed_lock_secs);
+            investor_effective_yield_bps = eff;
+            tier_lock_secs = lock;
+            Self::set_persistent_investor_effective_yield(&env, investor.clone(), eff);
+            let now = env.ledger().timestamp();
+            let claim_nb = if committed_lock_secs == 0 {
+                0u64
+            } else {
+                now.checked_add(committed_lock_secs)
+                    .unwrap_or_else(|| fail(&env, EscrowError::InvestorClaimTimeOverflow))
+            };
+            // Bound: reject if the claim lock would expire after the escrow maturity.
+            // Only constrained when both committed_lock_secs > 0 and maturity > 0.
+            if claim_nb > 0 && escrow.maturity > 0 {
+                ensure(
+                    &env,
+                    claim_nb <= escrow.maturity,
+                    EscrowError::CommitmentLockExceedsMaturity,
+                );
+            }
+            Self::set_persistent_investor_claim_not_before(&env, investor.clone(), claim_nb);
+
+            // Set investor lock-in period (separate from tier commitment lock)
+            let lock_in_secs: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::InvestorLockInSecs)
+                .unwrap_or(0);
+            if lock_in_secs > 0 {
+                let lock_until = now
+                    .checked_add(lock_in_secs)
+                    .unwrap_or_else(|| fail(&env, EscrowError::InvestorClaimTimeOverflow));
+                Self::set_persistent_investor_lock_in_until(&env, investor.clone(), lock_until);
+            }
+        }
+
+        escrow.funded_amount = escrow
+            .funded_amount
+            .checked_add(amount)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
+
+        // --- Concentration cap check ---
+        if let Some(concentration_cap) = env
+            .storage()
+            .instance()
+            .get::<DataKey, i64>(&DataKey::MaxInvestorConcentration)
+        {
+            if escrow.funded_amount > 0 {
+                // concentration = (investor_contribution * 100) / total_funded
+                let concentration_pct = new_contribution
+                    .checked_mul(100)
+                    .and_then(|v| v.checked_div(escrow.funded_amount))
+                    .unwrap_or(0);
+                if concentration_pct > concentration_cap as i128 {
+                    let diagnostic = ErrorDiagnostic::with_context(
+                        &env,
+                        EscrowError::ConcentrationLimitExceeded as u32,
+                        "Investor concentration exceeds configured cap",
+                        "Reduce funding amount or wait for other investors to fund",
+                        &format!("Current: {}%, Limit: {}%", concentration_pct, concentration_cap),
+                    );
+                    Self::emit_error_diagnostic(&env, diagnostic);
+                    fail(&env, EscrowError::ConcentrationLimitExceeded);
+                }
+            }
+        }
+
+        if escrow.status == 0 && escrow.funded_amount >= escrow.funding_target {
+            escrow.status = 1;
+            if !env.storage().instance().has(&DataKey::FundingCloseSnapshot) {
+                let snap = FundingCloseSnapshot {
+                    total_principal: escrow.funded_amount,
+                    funding_target: escrow.funding_target,
+                    closed_at_ledger_timestamp: env.ledger().timestamp(),
+                    closed_at_ledger_sequence: env.ledger().sequence(),
+                };
+                env.storage()
+                    .instance()
+                    .set(&DataKey::FundingCloseSnapshot, &snap);
+            }
+        }
+
+        Self::set_persistent_investor_contribution(&env, investor.clone(), new_contribution);
+
+        if prev == 0 {
+            // Use the hoisted cur_funder_count; no second storage read needed.
+            env.storage()
+                .instance()
+                .set(&DataKey::UniqueFunderCount, &(cur_funder_count + 1));
+        }
+
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        EscrowFunded {
+            name: symbol_short!("funded"),
+            invoice_id: escrow.invoice_id.clone(),
+            investor: investor.clone(),
+            amount,
+            funded_amount: escrow.funded_amount,
+            status: escrow.status,
+            // Locals set at write time; no post-write storage reads required.
+            investor_effective_yield_bps,
+            tier_lock_secs,
+        }
+        .publish(&env);
+
+        escrow
+    }
+
     /// Record investor principal while the invoice is **open**. First deposit sets base
     /// [`InvoiceEscrow::yield_bps`] for this investor; further amounts must use this method (not
     /// [`LiquifactEscrow::fund_with_commitment`]) so tier selection stays immutable after the first leg.
