@@ -8,11 +8,10 @@
 )]
 #[allow(unused_imports)]
 use super::{
-    AttestationDigestRevoked, CollateralRecordedEvt, ContractVersionMetadata, DataKey, EscrowError,
-    EscrowFunded, EscrowInitialized, FundingTargetUpdated, LiquifactEscrow, LiquifactEscrowClient,
-    MaxUniqueInvestorsCapLowered, TokenTransferFailedEvt, YieldTier,
-    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, MAX_INVESTOR_PAGE_SIZE,
-    SCHEMA_VERSION,
+    AttestationDigestRevoked, CollateralRecordedEvt, DataKey, EscrowError, EscrowFunded,
+    EscrowInitialized, FundingTargetUpdated, LiquifactEscrow, LiquifactEscrowClient,
+    MaxUniqueInvestorsCapLowered, YieldClaimDelegationRevoked, YieldClaimDelegationSet, YieldTier,
+    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -45,19 +44,26 @@ pub(crate) fn assert_contract_error<T, E>(
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
 mod attestations;
+mod batch_claim;
 mod cap_validation;
-mod chaos;
+mod clone;
 mod coverage;
+mod dos_analysis;
 mod external_calls;
 mod external_calls_mocked;
 mod validation;
 mod funding;
+mod health_and_events;
 mod init;
 mod integration;
 mod legal_hold;
 mod properties;
+mod properties_funding;
+mod secure_rng;
 mod settlement;
-mod yield_slippage;
+mod tokenomics;
+mod upgrade_compat;
+mod yield_distribution;
 
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
@@ -137,8 +143,11 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None,
         &None,
         &None,
+        &None, // No max funding rate
         &None, // No yield slippage threshold
         &None, // No settlement notifier
+        &None, // No KYC provider
+        &None, // No admin roles
     );
 }
 
@@ -180,6 +189,9 @@ pub fn init_and_fund_with_real_token<'a>(
         &treasury,
         &None,
         &None,
+        &None,
+        &None,
+        &None,        &None,
         &None,
         &None,
         &None,

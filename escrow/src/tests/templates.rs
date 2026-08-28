@@ -374,6 +374,10 @@ fn test_register_template_no_maturity_lock() {
         &None,
         &None,
         &None,
+        &None, // yield_slippage_threshold
+        &None, // yield_token
+        &None, // oracle_contract
+        &None, // nft_contract
     );
     assert!(!client3.has_maturity_lock());
 }

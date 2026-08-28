@@ -1,0 +1,6 @@
+# Fuzzer artifacts and corpus
+/target/
+/artifacts/
+/corpus/
+*.o
+.DS_Store

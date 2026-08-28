@@ -1,0 +1,19 @@
+# Cargo-audit advisory allowlist for karis-ky escrow contract.
+#
+# Advisories listed here are accepted with documented reasoning.
+# Review this file monthly (see CI monthly reports).
+# Format: https://rustsec.org/book/cargo-audit/config.html
+
+[advisories]
+# Example allowlist entry format (uncomment and document if needed):
+# ignore = [
+#     "RUSTSEC-YYYY-NNNN",   # Reason: documented justification
+# ]
+
+# By default, cargo-audit fails on any advisory with severity >= "low".
+# Uncomment and adjust if a specific severity should be informational only:
+# informational_warnings = ["unmaintained"]
+
+[output]
+# Fail CI if vulnerabilities found
+deny = ["warnings", "unsound", "yanked"]

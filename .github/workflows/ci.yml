@@ -29,6 +29,12 @@ jobs:
       - name: Build
         run: cargo build
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo-audit (dependency vulnerability scan)
+        run: cargo audit --deny warnings
+
       - name: Run tests
         run: cargo test
 
@@ -39,7 +45,27 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Build WASM
-        run: cargo build --target wasm32-unknown-unknown --release -p karis-ky_escrow
+        run: cargo build --target wasm32-unknown-unknown --release -p karis_ky_escrow
+        env:
+          # Make missing git metadata a hard build error in CI/release builds
+          # so the WASM artifact always carries a real commit hash. Local dev
+          # builds can unset this to allow tarball/shallow-checkout workflows.
+          REQUIRE_GIT_METADATA: "1"
+
+      # -----------------------------------------------------------------------
+      # Build metadata validation
+      # -----------------------------------------------------------------------
+      #
+      # Verifies that the metadata embedded into the WASM artifact by
+      # `escrow/build.rs` (git commit, build timestamp, package version,
+      # and the source-of-truth schema/interface versions) matches the
+      # values declared in `escrow/src/lib.rs`. Fails the build on drift.
+
+      - name: Validate embedded build metadata
+        run: |
+          python3 scripts/validate_build_metadata.py \
+            --json target/build_metadata.json \
+            --lib escrow/src/lib.rs
 
       # -----------------------------------------------------------------------
       # WASM size tracking

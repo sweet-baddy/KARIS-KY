@@ -27,3 +27,11 @@ node_modules/
 # OS
 .DS_Store
 pr.md
+
+# Local environment overrides (per-network config in repo root is safe;
+# per-developer secrets live in .env.<network>.local)
+.env.*.local
+.env.local
+
+.env.mainnet
+.env.staging

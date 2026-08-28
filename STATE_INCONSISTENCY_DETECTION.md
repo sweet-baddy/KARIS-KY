@@ -1,0 +1,158 @@
+# State Inconsistency Detection Entrypoint
+
+## Overview
+
+Added a **read-only diagnostic entrypoint** to detect and report state inconsistencies in the escrow contract. This feature enables auditing, monitoring, and debugging by identifying logical invariant violations without modifying state.
+
+## Components Added
+
+### 1. StateInconsistencyReport Struct
+
+A comprehensive report struct with 10 boolean flags indicating detected inconsistencies:
+
+```rust
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StateInconsistencyReport {
+    pub funded_exceeds_target_not_advanced: bool,
+    pub funded_amount_positive_status_open: bool,
+    pub zero_funded_amount_advanced_status: bool,
+    pub funders_exist_status_open: bool,
+    pub no_funders_advanced_status: bool,
+    pub snapshot_exists_not_funded: bool,
+    pub snapshot_missing_post_funded: bool,
+    pub settled_before_maturity_lock: bool,
+    pub invalid_funding_amounts: bool,
+    pub invalid_status_value: bool,
+}
+```
+
+**Detected Inconsistencies:**
+
+| Flag | Condition | Meaning |
+|------|-----------|---------|
+| `funded_exceeds_target_not_advanced` | `funded_amount > funding_target` AND `status < 1` | Funding exceeded target but escrow wasn't advanced to funded status |
+| `funded_amount_positive_status_open` | `funded_amount > 0` AND `status == 0` | Principal received but escrow still in open state |
+| `zero_funded_amount_advanced_status` | `funded_amount == 0` AND `status >= 1` | Advanced escrow has zero principal |
+| `funders_exist_status_open` | `unique_funder_count > 0` AND `status == 0` | Investors funded but escrow remains open |
+| `no_funders_advanced_status` | `unique_funder_count == 0` AND `status >= 1` | Advanced escrow has no recorded investors |
+| `snapshot_exists_not_funded` | Snapshot set AND `status < 1` | Funding snapshot exists before escrow became funded |
+| `snapshot_missing_post_funded` | No snapshot AND `status >= 2` | Advanced escrow missing funding snapshot |
+| `settled_before_maturity_lock` | `status == 2` AND `maturity > 0` AND `ledger_time < maturity` | Settlement before maturity lock expired |
+| `invalid_funding_amounts` | `funding_target <= 0` OR `amount <= 0` | Invalid funding target or invoice amount |
+| `invalid_status_value` | `status > 4` | Status outside valid range (0..=4) |
+
+### 2. StateInconsistenciesDetected Event
+
+```rust
+#[contractevent]
+pub struct StateInconsistenciesDetected {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub report: StateInconsistencyReport,
+}
+```
+
+**Published when:** Any inconsistency is detected (i.e., any report flag is `true`). Used for auditing, monitoring, and off-chain alerting.
+
+### 3. detect_state_inconsistencies Entrypoint
+
+A **read-only diagnostic function** that performs comprehensive state validation:
+
+```rust
+pub fn detect_state_inconsistencies(env: Env) -> StateInconsistencyReport
+```
+
+**Characteristics:**
+- **Authorization:** None required — pure read, safe to call at any time
+- **Storage mutations:** None — fully read-only
+- **Performance:** O(1) — all checks are local, no iteration
+- **Event emission:** Only if inconsistencies detected (StateInconsistenciesDetected)
+- **Return value:** StateInconsistencyReport with all flags populated
+
+**Usage:**
+```rust
+let report = LiquifactEscrow::detect_state_inconsistencies(env);
+if report.funded_exceeds_target_not_advanced {
+    // Handle inconsistency
+}
+```
+
+## Test Coverage
+
+Comprehensive test suite in `escrow/src/tests/state_inconsistency.rs` with 8 tests:
+
+1. **test_valid_escrow_no_inconsistencies** — Validates all flags false on valid initialized escrow
+2. **test_inconsistency_funded_exceeds_target_not_advanced** — Tests detection when funded > target but status < 1
+3. **test_inconsistency_funded_amount_positive_status_open** — Tests detection when funded > 0 but status == 0
+4. **test_inconsistency_funders_exist_status_open** — Tests detection when funders > 0 but status == 0
+5. **test_multiple_inconsistencies_detected** — Validates multiple flags can be true simultaneously
+6. **test_all_inconsistency_flags_false_on_valid_state** — Comprehensive validation of all flags on valid state
+7. **test_inconsistency_detection_is_readonly** — Verifies repeated calls return identical reports (no state change)
+8. **test_funded_exceeds_with_exact_match** — Validates exact target match doesn't trigger inconsistency
+
+## Integration Points
+
+### Contract Interface Version
+
+No change to `CONTRACT_INTERFACE_VERSION` — the new entrypoint is added without modifying existing signatures or return types.
+
+### Storage Keys
+
+Uses existing `DataKey` variants:
+- `DataKey::Escrow` (read)
+- `DataKey::FundingCloseSnapshot` (read)
+- `DataKey::UniqueFunderCount` (read)
+
+### Dependencies
+
+None added — uses only existing Soroban SDK and contract types.
+
+## Use Cases
+
+1. **Off-chain auditing:** Periodically call to detect anomalies
+2. **Real-time monitoring:** Watch for StateInconsistenciesDetected events
+3. **Post-incident debugging:** Call after error or unexpected behavior
+4. **Integration validation:** Verify escrow state before sensitive operations
+5. **Compliance checks:** Document state conformance for regulatory audits
+
+## Design Decisions
+
+1. **Read-only by design:** Diagnostic entrypoints should never mutate state
+2. **No auth required:** Auditing should be accessible to anyone
+3. **All-or-nothing reporting:** Return complete report in one call (no iterator)
+4. **Event-only on issues:** Reduce blockchain bloat for healthy escrows
+5. **Immutable report:** StateInconsistencyReport derives Clone for event payload
+6. **Fast path:** All O(1) lookups, no iteration over investor lists
+
+## Future Extensions
+
+Potential enhancements (not implemented):
+- Per-investor balance reconciliation
+- Yield computation validation
+- Attestation log integrity checks
+- Cross-escrow consistency checks (if registry exists)
+- Timeline violation detection (e.g., maturity past settlement)
+
+## Files Modified
+
+1. `/workspaces/KARIS-KY/escrow/src/lib.rs`
+   - Added `StateInconsistencyReport` struct (line 674)
+   - Added `StateInconsistenciesDetected` event (line 999)
+   - Added `detect_state_inconsistencies` entrypoint (line 1978)
+
+2. `/workspaces/KARIS-KY/escrow/src/tests.rs`
+   - Added `mod state_inconsistency` declaration
+
+3. `/workspaces/KARIS-KY/escrow/src/tests/state_inconsistency.rs`
+   - New comprehensive test module with 8 tests
+
+## Compatibility
+
+- ✅ Schema version unchanged (still 6)
+- ✅ Contract interface version unchanged
+- ✅ No breaking changes to existing entrypoints
+- ✅ No new storage keys required
+- ✅ Backward compatible with all prior deployments

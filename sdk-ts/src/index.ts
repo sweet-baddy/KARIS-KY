@@ -6,6 +6,8 @@ export {
   EscrowClient,
   type EscrowClientConfig,
   type SorobanRpcClient,
+  type SorobanEventFilter,
+  type SorobanEventQuery,
 } from "./client";
 
 export {
@@ -34,4 +36,7 @@ export {
   type EscrowTemplate,
   type InitParams,
   type SorobanResult,
+  type EscrowEvent,
+  type SorobanEventPage,
+  type EscrowEventSubscriptionOptions,
 } from "./types";

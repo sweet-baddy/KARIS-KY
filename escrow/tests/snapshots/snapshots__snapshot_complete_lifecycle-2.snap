@@ -1,0 +1,16 @@
+---
+source: escrow/tests/snapshots.rs
+assertion_line: 281
+expression: "EscrowSnapshot::from_escrow(&after_partial)"
+---
+{
+  "invoice_id": "Symbol(INV_SNAP_LIFECYCLE)",
+  "admin_debug": "Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4)",
+  "sme_address_debug": "Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M)",
+  "amount": 50000000000,
+  "funding_target": 50000000000,
+  "funded_amount": 16666666666,
+  "yield_bps": 1200,
+  "maturity": 0,
+  "status": 0
+}

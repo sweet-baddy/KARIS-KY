@@ -757,6 +757,9 @@ fn test_init_escrow_initialized_event_includes_bound_refs() {
             treasury,
             registry: Some(registry),
             has_maturity_lock: true,
+            yield_token: None,
+            oracle_contract: None,
+            nft_contract: None,
         }
         .to_xdr(&env, &contract_id)]
     );
@@ -804,6 +807,9 @@ fn test_init_escrow_initialized_event_registry_none() {
             treasury,
             registry: None,
             has_maturity_lock: false,
+            yield_token: None,
+            oracle_contract: None,
+            nft_contract: None,
         }
         .to_xdr(&env, &contract_id)]
     );
@@ -1111,4 +1117,54 @@ fn datakey_distributed_principal_starts_at_zero_and_increments_on_refund() {
 
     client.refund(&investor);
     assert_eq!(client.get_distributed_principal(), 500i128);
+}
+
+
+#[test]
+fn test_init_rejects_zero_funding_target() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let result = client.try_init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "ZERO_TARGET"),
+        &sme,
+        &0i128,  // funding_target = 0, should be rejected
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    assert_contract_error(result, EscrowError::InvalidFundingTarget);
+}
+
+#[test]
+fn test_init_rejects_negative_funding_target() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let result = client.try_init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "NEG_TARGET"),
+        &sme,
+        &-100i128,  // negative funding_target, should be rejected
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    // Negative amounts are also rejected by AmountMustBePositive first, but let's be thorough
+    assert_contract_error(result, EscrowError::AmountMustBePositive);
 }

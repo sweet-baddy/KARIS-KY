@@ -2,7 +2,10 @@ use super::{
     free_addresses, install_stellar_asset_token, setup, MAX_ATTESTATION_APPEND_ENTRIES,
     SCHEMA_VERSION,
 };
-use crate::{CollateralCommitmentSnapshot, DataKey, EscrowCloseSnapshot, EscrowError, YieldTier};
+use crate::{
+    CollateralCommitmentSnapshot, DataKey, EscrowCloseSnapshot, EscrowError, EscrowHealthMetrics,
+    YieldTier, FundReceived, AdminChanged, LegalHoldSet, EscrowPaused,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
@@ -105,7 +108,7 @@ fn typed_error_codes_cover_allowlist_attestation_and_dust_guards() {
         EscrowError::InvestorNotAllowlisted,
     );
 
-    let digest = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
+    let digest = soroban_sdk::Bytes::from_array(&env, &[1u8; 32]);
     client.bind_primary_attestation_hash(&digest);
     assert_contract_error(
         client.try_bind_primary_attestation_hash(&digest),
@@ -209,8 +212,12 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::NewSmeSameAsCurrent, 162),
         (EscrowError::FundingDeadlinePassed, 164),
         (EscrowError::NoPendingAdmin, 163),
+        (EscrowError::InvestorStillInLockIn, 165),
+        (EscrowError::ConcentrationLimitExceeded, 166),
+        (EscrowError::ConcentrationInvalidRange, 167),
+        (EscrowError::LegalHoldReasonTooLong, 168),
     ];
-    assert_eq!(TABLE.len(), 84);
+    assert_eq!(TABLE.len(), 88);
     for (variant, code) in TABLE {
         assert_eq!(*variant as u32, *code, "discriminant drift for code {code}");
     }
@@ -397,13 +404,13 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
     );
     let digest = BytesN::from_array(&env, &[1u8; 32]);
-    attest_client.bind_primary_attestation_hash(&digest);
+    attest_client.bind_primary_attestation_hash(&soroban_sdk::Bytes::from_array(&env, &[1u8; 32]));
     assert_contract_error(
-        attest_client.try_bind_primary_attestation_hash(&digest),
+        attest_client.try_bind_primary_attestation_hash(&soroban_sdk::Bytes::from_array(&env, &[1u8; 32])),
         EscrowError::PrimaryAttestationAlreadyBound,
     );
     for i in 0u8..MAX_ATTESTATION_APPEND_ENTRIES as u8 {
-        attest_client.append_attestation_digest(&BytesN::from_array(&env, &[i; 32]));
+        attest_client.append_attestation_digest(&symbol_short!(""), &BytesN::from_array(&env, &[i; 32]));
     }
     assert_contract_error(
         attest_client.try_append_attestation_digest(&BytesN::from_array(&env, &[0xFF; 32])),
@@ -622,12 +629,12 @@ fn typed_error_codes_cover_range_boundaries() {
     );
     lh_client.set_legal_hold(&true);
     assert_contract_error(
-        lh_client.try_set_legal_hold(&false),
+        lh_client.try_set_legal_hold(&false, &String::from_str(&env, "")),
         EscrowError::LegalHoldClearRequestMissing,
     );
     lh_client.request_clear_legal_hold();
     assert_contract_error(
-        lh_client.try_set_legal_hold(&false),
+        lh_client.try_set_legal_hold(&false, &String::from_str(&env, "")),
         EscrowError::LegalHoldClearNotReady,
     );
 
@@ -682,6 +689,10 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
+        &None, // yield_slippage_threshold
+        &None, // yield_token
+        &None, // oracle_contract
+        &None, // nft_contract
     );
     rot_token.stellar.mint(&rot_terminal.address, &100);
     rot_terminal.fund(&investor, &100);
@@ -958,7 +969,7 @@ fn test_fund_during_legal_hold() {
         &None,
     );
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     let investor = Address::generate(&env);
     client.fund(&investor, &10);
 }
@@ -1096,7 +1107,7 @@ fn test_all_getters() {
     assert_eq!(client.get_funding_token(), funding_token);
     assert_eq!(client.get_treasury(), treasury);
     assert_eq!(client.get_registry_ref(), Some(registry));
-    assert_eq!(client.get_version(), 6);
+    assert_eq!(client.get_version(), 7);
     assert!(!client.get_legal_hold());
     assert_eq!(client.get_min_contribution_floor(), 10);
     assert_eq!(client.get_max_unique_investors_cap(), Some(5));
@@ -1132,13 +1143,16 @@ fn test_attestations_happy_path() {
         &None,
     );
 
-    let hash1 = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
+    let hash1 = soroban_sdk::Bytes::from_array(&env, &[1u8; 32]);
     let hash2 = soroban_sdk::BytesN::from_array(&env, &[2u8; 32]);
 
     client.bind_primary_attestation_hash(&hash1);
-    assert_eq!(client.get_primary_attestation_hash(), Some(hash1.clone()));
+    assert_eq!(
+        client.get_primary_attestation_hash(),
+        Some(soroban_sdk::BytesN::from_array(&env, &[1u8; 32]))
+    );
 
-    client.append_attestation_digest(&hash2);
+    client.append_attestation_digest(&symbol_short!(""), &hash2);
     let log = client.get_attestation_append_log();
     assert_eq!(log.len(), 1);
     assert_eq!(log.get(0).unwrap(), hash2);
@@ -1171,7 +1185,7 @@ fn test_bind_primary_attestation_twice() {
         &None,
     );
 
-    let hash = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
+    let hash = soroban_sdk::Bytes::from_array(&env, &[1u8; 32]);
     client.bind_primary_attestation_hash(&hash);
     client.bind_primary_attestation_hash(&hash);
 }
@@ -1280,6 +1294,85 @@ fn test_sweep_terminal_dust_happy_path() {
 }
 
 #[test]
+fn test_sweep_terminal_dust_handles_one_unit_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let token = crate::tests::install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T1"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&Address::generate(&env), &100);
+    env.ledger().with_mut(|li| li.timestamp = 200);
+    client.settle();
+
+    token.stellar.mint(&client.address, &1);
+
+    let swept = client.sweep_terminal_dust(&1);
+    assert_eq!(swept, 1);
+    assert_eq!(token.token.balance(&treasury), 1);
+}
+
+#[test]
+fn test_sweep_terminal_dust_handles_sub_cap_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let token = crate::tests::install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let dust_amount = MAX_DUST_SWEEP_AMOUNT - 1;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T2"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&Address::generate(&env), &100);
+    env.ledger().with_mut(|li| li.timestamp = 200);
+    client.settle();
+
+    token.stellar.mint(&client.address, &dust_amount);
+
+    let swept = client.sweep_terminal_dust(&dust_amount);
+    assert_eq!(swept, dust_amount);
+    assert_eq!(token.token.balance(&treasury), dust_amount);
+}
+
+#[test]
 fn test_bump_ttl_covers_persistent_investor_keys() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1314,6 +1407,77 @@ fn test_bump_ttl_covers_persistent_investor_keys() {
     let mut investors = SorobanVec::new(&env);
     investors.push_back(investor);
     client.bump_ttl(&investors);
+}
+
+#[test]
+fn test_bump_ttl_accepts_empty_batch_instance_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL002"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // An empty `allowlisted` vector is valid: it still extends the instance TTL,
+    // it just skips the per-investor persistent-key loop.
+    let empty: SorobanVec<Address> = SorobanVec::new(&env);
+    client.bump_ttl(&empty);
+}
+
+#[test]
+fn test_bump_ttl_rejects_batch_over_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL003"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let mut too_many: SorobanVec<Address> = SorobanVec::new(&env);
+    for _ in 0..=crate::MAX_TTL_BUMP_BATCH {
+        too_many.push_back(Address::generate(&env));
+    }
+
+    assert_contract_error(
+        client.try_bump_ttl(&too_many),
+        EscrowError::TtlBumpBatchTooLarge,
+    );
 }
 
 #[test]
@@ -1684,7 +1848,10 @@ fn test_sme_collateral_replacement_preserves_prior_amount() {
         &soroban_sdk::String::from_str(&env, "gold_bullion"),
     );
     assert_eq!(second.amount, 7000);
-    assert_eq!(second.recorded_at, 20000);
+    // recorded_at is preserved from the original write (setup sets timestamp=12345).
+    assert_eq!(second.recorded_at, 12345);
+    // updated_at reflects the most recent write timestamp.
+    assert_eq!(second.updated_at, 20000);
 
     let stored = client.get_sme_collateral_commitment().unwrap();
     assert_eq!(stored.amount, 7000);
@@ -1716,7 +1883,7 @@ fn test_clear_legal_hold_convenience() {
         &None,
     );
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     assert!(client.get_legal_hold());
     client.clear_legal_hold();
     assert!(!client.get_legal_hold());
@@ -2256,7 +2423,7 @@ fn test_get_escrow_summary_happy_path() {
     assert_eq!(summary.funding_close_snapshot, EscrowCloseSnapshot::None);
     assert_eq!(summary.unique_funder_count, 0);
     assert!(!summary.is_allowlist_active);
-    assert_eq!(summary.schema_version, 6);
+    assert_eq!(summary.schema_version, 7);
     assert_eq!(
         summary.sme_collateral_commitment,
         CollateralCommitmentSnapshot::None
@@ -2299,7 +2466,7 @@ fn test_get_escrow_summary_after_state_changes() {
     client.set_investor_allowlisted(&investor, &true);
     // Fund enough to trigger funded status and capture snapshot
     client.fund(&investor, &1000);
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
 
     let summary = client.get_escrow_summary();
 
@@ -2402,8 +2569,8 @@ fn test_get_escrow_summary_with_collateral_and_attestations() {
     // Append several attestation digests
     let hash2 = soroban_sdk::BytesN::from_array(&env, &[2u8; 32]);
     let hash3 = soroban_sdk::BytesN::from_array(&env, &[3u8; 32]);
-    client.append_attestation_digest(&hash2);
-    client.append_attestation_digest(&hash3);
+    client.append_attestation_digest(&symbol_short!(""), &hash2);
+    client.append_attestation_digest(&symbol_short!(""), &hash3);
 
     let summary = client.get_escrow_summary();
 
@@ -2669,7 +2836,7 @@ fn test_is_settleable_blocked_by_legal_hold() {
     let (client, admin, sme) = setup(&env);
     init_settleable_test(&env, &client, &admin, &sme, 0);
     fund_to_target_stl(&env, &client);
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     assert!(!client.is_settleable());
 }
 
@@ -2716,7 +2883,7 @@ fn test_is_settleable_funded_maturity_zero_hold_active_returns_false() {
     let (client, admin, sme) = setup(&env);
     init_settleable_test(&env, &client, &admin, &sme, 0);
     fund_to_target_stl(&env, &client);
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     assert!(
         !client.is_settleable(),
         "hold must block settleability even when maturity is 0"

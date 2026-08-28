@@ -1,5 +1,105 @@
 # Feature #224: Contract Debugger Trace Mode
 
+## Issue Specification
+
+**Issue ID:** FEAT-015
+**Category:** FEAT
+**Status:** Specified - Ready for assignment
+**Related backlog item:** FEATURE_224
+**Priority:** Medium
+
+### Full Description
+
+Add an opt-in trace mode to the escrow contract so operators and developers can
+diagnose storage mutations and important state transitions from indexed contract
+events. Trace data must be useful for forensic debugging without exposing stored
+values, changing contract behavior, or adding meaningful overhead to the normal
+production path.
+
+The feature covers trace configuration, event emission, bounded in-contract
+inspection, and tests for both enabled and disabled builds. It does not include a
+new external observability service, historical backfilling, or a replacement for
+the existing business events.
+
+### Current Behavior
+
+The contract emits business-domain events, but it has no trace-specific event
+type, trace configuration entrypoint, trace buffer, or `trace-mode` Cargo feature.
+An operator investigating a failed fund, settle, or claim must infer internal
+storage activity from the transaction result and existing business events.
+
+### Steps to Reproduce
+
+1. Build or test the workspace using the default Cargo features.
+2. Execute a representative escrow operation such as `fund`, `settle`, or
+   `claim`.
+3. Inspect the emitted events and contract instance storage.
+4. Attempt to enable tracing or retrieve a trace buffer.
+
+**Observed result:** Only existing business events are available; there is no
+trace configuration or read/write history to inspect. The repository also has no
+`trace-mode` feature or trace-specific implementation.
+
+### Expected vs. Actual Behavior
+
+| Area | Expected behavior | Actual behavior |
+|------|-------------------|-----------------|
+| Configuration | An authorized admin can enable a documented level and disable tracing. | No trace configuration API exists. |
+| Diagnostics | Enabled tracing emits structured events for selected storage operations and state transitions. | No trace events are emitted. |
+| Data exposure | Trace payloads contain hashes and metadata, not raw stored values. | No trace payload contract exists. |
+| Production path | Tracing is off by default and disabled builds preserve current behavior and overhead. | No opt-in trace feature or no-op path exists. |
+| Inspection | Operators can read and clear a bounded trace buffer when enabled. | No trace buffer exists. |
+
+### Environment Context
+
+- **Repository:** `sweet-baddy/KARIS-KY`
+- **Branch:** `main`
+- **Runtime:** Soroban smart contract in Rust
+- **Workspace manifest:** `Cargo.toml` with the `escrow` member
+- **Primary implementation surface:** `escrow/src/lib.rs`
+- **Relevant operations:** funding, settlement, claims, storage reads/writes, and
+  state transitions
+- **Reproduction date:** 2026-08-27
+- **Network/deployment:** Reproducible locally; no deployed network is required
+  to verify the missing capability
+
+### Proposed Solution
+
+1. Add a `trace-mode` Cargo feature and compile trace instrumentation behind it.
+2. Define versioned, structured trace event and buffer types containing the
+   verbosity level, operation name, key/value hashes, ledger timestamp, and a
+   bounded diagnostic message.
+3. Add admin-only enable, disable, and clear entrypoints, plus a read-only
+   buffer inspection entrypoint. Reject unsupported levels with a typed error.
+4. Instrument the smallest shared storage/state-transition helpers so fund,
+   settle, and claim paths produce consistent traces without duplicating logic.
+5. Keep tracing disabled by default. In builds without `trace-mode`, compile
+   instrumentation to no-ops and retain existing business-event behavior.
+6. Add unit and integration tests for authorization, level filtering, hash-only
+   payloads, buffer bounds, clearing, disabled behavior, and compatibility with
+   existing operations.
+
+### Acceptance Criteria
+
+- [ ] `trace-mode` is an optional Cargo feature and is disabled by default.
+- [ ] An admin can enable each supported level and disable tracing; unauthorized
+    callers and invalid levels fail with typed errors.
+- [ ] Enabled tracing emits structured events for the documented storage writes
+    and state transitions in `fund`, `settle`, and `claim`.
+- [ ] TRACE-level reads and DEBUG-level writes are filtered according to the
+    documented verbosity table; lower levels do not emit higher-level details.
+- [ ] Trace payloads never contain raw storage keys or raw stored values; hashes
+    and bounded metadata are used instead.
+- [ ] The trace buffer has a fixed maximum size, remains readable, and can be
+    cleared by an admin without affecting escrow state.
+- [ ] Tracing is off by default, and existing business events and return values
+    are unchanged when it is disabled.
+- [ ] Tests cover enabled, disabled, unauthorized, invalid-level, filtering,
+    buffer-bound, clear, and representative escrow-operation cases.
+- [ ] `cargo test` and `cargo test --features trace-mode` pass for the workspace.
+- [ ] Operator documentation explains configuration, event fields, retention,
+    and the production/staging/development recommended levels.
+
 ## Overview
 
 Emit detailed trace events for each storage operation (read/write) and state transitions for forensic analysis and debugging.

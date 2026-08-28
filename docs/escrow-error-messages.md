@@ -36,13 +36,16 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Funding batch | 82–83 | [`fund_batch`] entry count bounds | 82, 83 |
 | Settlement / payout | 120–129 | Settle, withdraw, investor claims, payout math | 120, 129 |
 | Cancel / refund | 140–143 | Cancel funding and investor refunds | 140, 143 |
-| Legal-hold clear (two-phase) | 150–152 | Delayed compliance-hold lift workflow | 150, 152 |
+| Legal-hold operations | 150–154 | Delayed compliance-hold lift workflow, terminal state guard | 150, 154 |
 | Beneficiary rotation | 160–162 | Governed SME address rotation | 160, 162 |
 | Admin handover / funding deadline | 163–164 | `accept_admin` and post-deadline funding | 163, 164 |
+| Clone escrow | 170–171 | Clone settled escrow to create new instances | 170, 171 |
 
 See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
-[`docs/ESCROW_BENEFICIARY_ROTATION.md`](ESCROW_BENEFICIARY_ROTATION.md), and
-[`docs/adr/ADR-006-dust-sweep-and-token-safety.md`](adr/ADR-006-dust-sweep-and-token-safety.md).
+[`docs/ESCROW_BENEFICIARY_ROTATION.md`](ESCROW_BENEFICIARY_ROTATION.md),
+[`docs/escrow-state-snapshots.md`](escrow-state-snapshots.md),
+[`docs/adr/ADR-006-dust-sweep-and-token-safety.md`](adr/ADR-006-dust-sweep-and-token-safety.md), and
+[`docs/adr/ADR-008-state-snapshots.md`](adr/ADR-008-state-snapshots.md).
 
 ## Canonical Reference Table
 
@@ -127,11 +130,15 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 150 | `LegalHoldClearRequestMissing` | `set_legal_hold(false)`, `clear_legal_hold` | clearing with non-zero delay but no prior `request_clear_legal_hold` | Call `request_clear_legal_hold` first | typed |
 | 151 | `LegalHoldClearNotReady` | `set_legal_hold(false)`, `clear_legal_hold` | `ledger.timestamp() < clearable_at` | Wait until clear delay elapses | typed |
 | 152 | `LegalHoldClearDelayOverflow` | `request_clear_legal_hold` | `timestamp + delay` overflows `u64` | Reduce delay or timestamp | typed |
+| 153 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
+| 154 | `LegalHoldSetOnTerminalEscrow` | `set_legal_hold` | escrow status >= 2 (settled, withdrawn, cancelled, archived) | Hold cannot be set on completed escrows | typed |
 | 160 | `LegalHoldBlocksBeneficiaryRotation` | `rotate_beneficiary` | legal hold active | Clear hold before rotation | typed |
 | 161 | `RotationNotOpen` | `rotate_beneficiary` | status not `0` (open) or `1` (funded) | Rotation only before settlement | typed |
 | 162 | `NewSmeSameAsCurrent` | `rotate_beneficiary` | `new_sme == current sme_address` | Pass a different beneficiary | typed |
 | 163 | `NoPendingAdmin` | `accept_admin` | no pending admin nomination stored | Call `propose_admin` first | typed |
 | 164 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
+| 170 | `CloneNotSettled` | `clone_settled_escrow` | template escrow status `!= 2` (settled) | Use a settled escrow as template | typed |
+| 171 | `CloneAmountNotPositive` | `clone_settled_escrow` | `new_amount <= 0` | Pass a positive invoice amount for the clone | typed |
 
 ### Legacy panic strings (migration aid)
 

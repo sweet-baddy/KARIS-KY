@@ -18,6 +18,88 @@ impl MockToken {
     }
 }
 
+#[contract]
+pub struct RegistryIntegrationMock;
+
+#[contractimpl]
+impl RegistryIntegrationMock {
+    pub fn register_escrow(env: Env, invoice_id: Symbol, escrow_address: Address) {
+        env.storage().persistent().set(&invoice_id, &escrow_address);
+    }
+
+    pub fn get_escrow(env: Env, invoice_id: Symbol) -> Option<Address> {
+        env.storage().persistent().get(&invoice_id)
+    }
+}
+
+#[contract]
+pub struct FailingRegistryMock;
+
+#[contractimpl]
+impl FailingRegistryMock {
+    pub fn register_escrow(_env: Env, _invoice_id: Symbol, _escrow_address: Address) {
+        panic!("registry unavailable")
+    }
+}
+
+fn init_for_registry_test(
+    env: &Env,
+    client: &LiquifactEscrowClient<'_>,
+    admin: &Address,
+    registry: Option<Address>,
+) {
+    let token = install_stellar_asset_token(env);
+    let treasury = Address::generate(env);
+    let sme = Address::generate(env);
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, "REGISTRY_TEST"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &token.id,
+        &registry,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+}
+
+#[test]
+fn test_register_with_registry_calls_registration_function() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let registry = env.register(RegistryIntegrationMock, ());
+    init_for_registry_test(&env, &client, &admin, Some(registry.clone()));
+
+    assert!(client.register_with_registry());
+    let invoice_id = client.get_escrow().invoice_id;
+    let registry_client = RegistryIntegrationMockClient::new(&env, &registry);
+    assert_eq!(registry_client.get_escrow(&invoice_id), Some(client.address.clone()));
+}
+
+#[test]
+fn test_register_with_registry_failure_is_non_blocking_and_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let registry = env.register(FailingRegistryMock, ());
+    init_for_registry_test(&env, &client, &admin, Some(registry));
+
+    assert!(!client.register_with_registry());
+    assert!(env.events().all().events().len() >= 2);
+}
+
 /// **MID-FLOW LEGAL HOLD INTEGRATION TEST (USER-EXPERIENCE NARRATIVE)**
 ///
 /// What a user sees:
@@ -65,11 +147,11 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     // capture it for auth mock setup.
 
     // --- Phase 1: enable hold, see it reflected ---
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     assert!(client.get_legal_hold());
 
     // --- Phase 2: clear hold ---
-    client.set_legal_hold(&false);
+    client.set_legal_hold(&false, &String::from_str(&env, ""));
     assert!(!client.get_legal_hold());
 
     // --- Phase 3: fund (hold is off) ---
@@ -77,11 +159,11 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     assert_eq!(client.get_escrow().funded_amount, 100_000_000);
 
     // --- Phase 4: enable hold mid-stream (post-fund, pre-settle) ---
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     assert!(client.get_legal_hold());
 
     // --- Phase 5: clear hold, settle ---
-    client.set_legal_hold(&false);
+    client.set_legal_hold(&false, &String::from_str(&env, ""));
     assert!(!client.get_legal_hold());
 
     // --- Phase 6: settle ---
@@ -89,11 +171,11 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     assert_eq!(client.get_escrow().status, 2);
 
     // --- Phase 7: enable hold again after settlement ---
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     assert!(client.get_legal_hold());
 
     // --- Phase 8: clear hold for cleanup ---
-    client.set_legal_hold(&false);
+    client.set_legal_hold(&false, &String::from_str(&env, ""));
     assert!(!client.get_legal_hold());
 
     // --- Event verification ---
@@ -782,7 +864,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
     assert_eq!(open_state.status, 0);
 
     // Hold on: next funding + settle attempts must be blocked.
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
     assert!(client.get_legal_hold());
 
     let fund_blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -928,7 +1010,7 @@ fn withdraw_transfers_funded_amount_to_sme() {
         "escrow must hold exactly funded_amount before withdraw"
     );
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     let sme_after = token.balance(&sme);
     let contract_after = token.balance(&escrow_id);
@@ -956,9 +1038,9 @@ fn withdraw_updates_distributed_principal() {
     env.mock_all_auths();
 
     let target = 20_000_000i128;
-    let (client, _escrow_id, _token, _sme) = setup_withdraw_with_token(&env, target, "WD_DP001");
+    let (client, _escrow_id, _token, sme) = setup_withdraw_with_token(&env, target, "WD_DP001");
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     // DistributedPrincipal is internal storage — verify indirectly via the
     // dust-sweep liability floor.  After disbursement the outstanding liability
@@ -977,11 +1059,11 @@ fn withdraw_blocked_by_legal_hold_integration() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (client, _escrow_id, _token, _sme) =
+    let (client, _escrow_id, _token, sme) =
         setup_withdraw_with_token(&env, 10_000_000i128, "WD_LH001");
 
-    client.set_legal_hold(&true);
-    client.withdraw(); // must panic: LegalHoldBlocksWithdrawal
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
+    client.withdraw(&sme); // must panic: LegalHoldBlocksWithdrawal
 }
 
 /// `withdraw` is rejected when escrow status is 0 (open / not yet funded).
@@ -1020,7 +1102,7 @@ fn withdraw_rejected_wrong_status_open() {
         &None,
     );
     // No funding — status is 0.
-    client.withdraw(); // must panic: WithdrawalNotFunded
+    client.withdraw(&sme); // must panic: WithdrawalNotFunded
 }
 
 /// `withdraw` is rejected when contract balance is less than `funded_amount`
@@ -1069,7 +1151,7 @@ fn withdraw_rejected_insufficient_contract_balance() {
     // Mint only half — contract balance < funded_amount.
     sac_admin.mint(&escrow_id, &(target / 2));
 
-    client.withdraw(); // must panic: InsufficientContractBalance
+    client.withdraw(&sme); // must panic: InsufficientContractBalance
 }
 
 /// A second `withdraw` call must be rejected (status already 3, not 1).
@@ -1079,11 +1161,11 @@ fn withdraw_double_withdraw_panics() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (client, _escrow_id, _token, _sme) =
+    let (client, _escrow_id, _token, sme) =
         setup_withdraw_with_token(&env, 10_000_000i128, "WD_DW001");
 
-    client.withdraw(); // succeeds — status → 3
-    client.withdraw(); // must panic: WithdrawalNotFunded (status == 3 != 1)
+    client.withdraw(&sme); // succeeds — status → 3
+    client.withdraw(&sme); // must panic: WithdrawalNotFunded (status == 3 != 1)
 }
 
 /// `SmeWithdrew` event includes the correct recipient address.
@@ -1098,7 +1180,7 @@ fn withdraw_event_includes_recipient() {
     let target = 5_000_000i128;
     let (client, escrow_id, _token, sme) = setup_withdraw_with_token(&env, target, "WD_EV001");
 
-    client.withdraw();
+    client.withdraw(&sme);
 
     let escrow = client.get_escrow();
 
@@ -1115,5 +1197,407 @@ fn withdraw_event_includes_recipient() {
     assert!(
         found,
         "SmeWithdrew event with correct recipient and amount must be emitted"
+    );
+}
+
+// ============================================================================
+// MULTI-TOKEN SCENARIOS — USDC, EURC, and fee-on-transfer (Issue #407)
+// ============================================================================
+
+/// Helper: Create a token with specified decimals
+fn setup_token_with_decimals(env: &Env, decimals: u32) -> (Address, StellarAssetClient, TokenClient) {
+    use soroban_sdk::token::{StellarAssetClient, TokenClient};
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(env, &token_id);
+    let token = TokenClient::new(env, &token_id);
+
+    sac_admin.set_decimals(&decimals);
+
+    (token_id, sac_admin, token)
+}
+
+/// USDC-like token full lifecycle test (6 decimals)
+#[test]
+fn test_usdc_like_token_full_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let contract_id = client.address.clone();
+
+    const DECIMALS: u32 = 6;
+    const BASE_UNIT: i128 = 10_i128.pow(DECIMALS);
+    let target = 50_000 * BASE_UNIT;
+
+    let (token_id, sac_admin, token) = setup_token_with_decimals(&env, DECIMALS);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "USDC001"),
+        &sme,
+        &target,
+        &800,
+        &0,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 0);
+    assert_eq!(escrow.funded_amount, 0);
+
+    let fund_amount = target;
+    let funded = client.fund(&investor, &fund_amount);
+    assert_eq!(funded.status, 1);
+    assert_eq!(funded.funded_amount, fund_amount);
+    assert_eq!(client.get_contribution(&investor), fund_amount);
+
+    sac_admin.mint(&contract_id, &fund_amount);
+    assert_eq!(token.balance(&contract_id), fund_amount);
+
+    let settled = client.settle();
+    assert_eq!(settled.status, 2);
+
+    client.claim_investor_payout(&investor);
+    assert!(client.is_investor_claimed(&investor));
+
+    let yield_bps = client.get_investor_yield_bps(&investor);
+    assert_eq!(yield_bps, 800);
+
+    let final_escrow = client.get_escrow();
+    assert_eq!(final_escrow.status, 2);
+}
+
+/// EURC-like token full lifecycle test (6 decimals)
+#[test]
+fn test_eurc_like_token_full_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let contract_id = client.address.clone();
+
+    const DECIMALS: u32 = 6;
+    const BASE_UNIT: i128 = 10_i128.pow(DECIMALS);
+    let target = 25_000 * BASE_UNIT;
+
+    let (token_id, sac_admin, token) = setup_token_with_decimals(&env, DECIMALS);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "EURC001"),
+        &sme,
+        &target,
+        &900,
+        &0,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 0);
+    assert_eq!(escrow.funded_amount, 0);
+
+    let fund_amount = target;
+    let funded = client.fund(&investor, &fund_amount);
+    assert_eq!(funded.status, 1);
+    assert_eq!(funded.funded_amount, fund_amount);
+    assert_eq!(client.get_contribution(&investor), fund_amount);
+
+    sac_admin.mint(&contract_id, &fund_amount);
+    assert_eq!(token.balance(&contract_id), fund_amount);
+
+    let settled = client.settle();
+    assert_eq!(settled.status, 2);
+
+    client.claim_investor_payout(&investor);
+    assert!(client.is_investor_claimed(&investor));
+
+    let yield_bps = client.get_investor_yield_bps(&investor);
+    assert_eq!(yield_bps, 900);
+
+    let final_escrow = client.get_escrow();
+    assert_eq!(final_escrow.status, 2);
+}
+
+/// Mock fee-on-transfer token
+#[contract]
+pub struct MockFeeToken;
+
+#[contractimpl]
+impl MockFeeToken {
+    pub fn init(env: Env, admin: Address, decimals: u32) {
+        env.storage().persistent().set(&DataKey::Admin, &admin);
+        env.storage().persistent().set(&DataKey::Decimals, &decimals);
+    }
+
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        let fee = amount / 20;
+        let _amount_after_fee = amount - fee;
+        // The escrow should detect the fee and reject with error codes 36-41
+    }
+
+    pub fn balance(env: Env, id: Address) -> i128 {
+        0
+    }
+
+    pub fn decimals(env: Env) -> u32 {
+        env.storage().persistent().get(&DataKey::Decimals).unwrap_or(6)
+    }
+}
+
+/// Fee-on-transfer mock token test
+#[test]
+#[should_panic(expected = "FeeOnTransfer")]
+fn test_fee_on_transfer_token_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    let token_id = env.register(MockFeeToken, ());
+    let token_client = MockFeeTokenClient::new(&env, &token_id);
+
+    const DECIMALS: u32 = 6;
+    const BASE_UNIT: i128 = 10_i128.pow(DECIMALS);
+    let target = 10_000 * BASE_UNIT;
+
+    token_client.init(&admin, &DECIMALS);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "FEE001"),
+        &sme,
+        &target,
+        &800,
+        &0,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &target);
+    panic!("Funding should have been rejected for fee-on-transfer token");
+
+}
+
+// ============================================================================
+// TIER BOUNDARY TESTS — fund_with_commitment tier selection (Issue #412)
+// ============================================================================
+
+/// Tests tier selection boundaries for fund_with_commitment
+///
+/// Verifies correct tier is selected at:
+/// - Just below each boundary → should NOT get the higher tier
+/// - Exactly at each boundary → should get the higher tier
+/// - Just above each boundary → should get the higher tier
+#[test]
+fn test_fund_with_commitment_tier_boundaries() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    const BASE_UNIT: i128 = 10_000_000; // USDC-like 7 decimals
+    const TARGET: i128 = 30_000 * BASE_UNIT;
+    const BASE_YIELD_BPS: i64 = 800; // 8% base yield
+
+    // Define yield tiers (same as in the gold-standard test)
+    // Tier 1: 90 days → 10%
+    // Tier 2: 180 days → 12%
+    // Tier 3: 365 days → 15%
+    let day = 24 * 60 * 60; // seconds in a day
+    let yield_tiers = SorobanVec::from_array(
+        &env,
+        [
+            YieldTier {
+                min_lock_secs: 90 * day,
+                yield_bps: 1000,
+            },
+            YieldTier {
+                min_lock_secs: 180 * day,
+                yield_bps: 1200,
+            },
+            YieldTier {
+                min_lock_secs: 365 * day,
+                yield_bps: 1500,
+            },
+        ],
+    );
+
+    // Initialize escrow with tiered yield
+    client.init(
+        &admin,
+        &String::from_str(&env, "TIER_BOUNDARY_001"),
+        &sme,
+        &TARGET,
+        &BASE_YIELD_BPS,
+        &0, // No maturity lock for testing
+        &funding_token,
+        &None,
+        &treasury,
+        &Some(yield_tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // ---- Helper: fund with commitment and verify yield ----
+    fn test_lock_period(
+        env: &Env,
+        client: &LiquifactEscrowClient,
+        lock_secs: u64,
+        expected_yield: i64,
+        description: &str,
+    ) {
+        let investor = Address::generate(env);
+        let amount = 1_000 * 10_000_000; // 1,000 USDC
+        client.fund_with_commitment(&investor, &amount, &lock_secs);
+        let actual_yield = client.get_investor_yield_bps(&investor);
+        assert_eq!(
+            actual_yield, expected_yield,
+            "{}: expected {} bps, got {} bps for lock {}s",
+            description, expected_yield, actual_yield, lock_secs
+        );
+    }
+
+    // ---- Test Tier 1 Boundary (90 days) ----
+    let day_secs = 24 * 60 * 60;
+    let tier1_boundary = 90 * day_secs;
+
+    test_lock_period(
+        &env,
+        &client,
+        tier1_boundary - 1, // 89 days, 23h 59m 59s
+        BASE_YIELD_BPS,
+        "Just below Tier 1",
+    );
+
+    test_lock_period(
+        &env,
+        &client,
+        tier1_boundary, // 90 days exactly
+        1000,
+        "Exactly Tier 1",
+    );
+
+    test_lock_period(
+        &env,
+        &client,
+        tier1_boundary + 1, // 90 days + 1 second
+        1000,
+        "Just above Tier 1",
+    );
+
+    // ---- Test Tier 2 Boundary (180 days) ----
+    let tier2_boundary = 180 * day_secs;
+
+    test_lock_period(
+        &env,
+        &client,
+        tier2_boundary - 1, // 179 days, 23h 59m 59s
+        1000, // Should still be Tier 1 (10%)
+        "Just below Tier 2",
+    );
+
+    test_lock_period(
+        &env,
+        &client,
+        tier2_boundary, // 180 days exactly
+        1200,
+        "Exactly Tier 2",
+    );
+
+    test_lock_period(
+        &env,
+        &client,
+        tier2_boundary + 1, // 180 days + 1 second
+        1200,
+        "Just above Tier 2",
+    );
+
+    // ---- Test Tier 3 Boundary (365 days) ----
+    let tier3_boundary = 365 * day_secs;
+
+    test_lock_period(
+        &env,
+        &client,
+        tier3_boundary - 1, // 364 days, 23h 59m 59s
+        1200, // Should still be Tier 2 (12%)
+        "Just below Tier 3",
+    );
+
+    test_lock_period(
+        &env,
+        &client,
+        tier3_boundary, // 365 days exactly
+        1500,
+        "Exactly Tier 3",
+    );
+
+    test_lock_period(
+        &env,
+        &client,
+        tier3_boundary + 1, // 365 days + 1 second
+        1500,
+        "Just above Tier 3",
+    );
+
+    // ---- Edge Cases ----
+    // Test with 0 lock (should use base yield)
+    test_lock_period(
+        &env,
+        &client,
+        0,
+        BASE_YIELD_BPS,
+        "Zero lock period (base yield)",
+    );
+
+    // Test with very large lock (should still be Tier 3 max)
+    test_lock_period(
+        &env,
+        &client,
+        1000 * day_secs, // 1000 days
+        1500,
+        "Very large lock period (capped at Tier 3)",
     );
 }
