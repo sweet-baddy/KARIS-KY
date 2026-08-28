@@ -10,14 +10,22 @@
 //! off-chain verifiers can confirm the on-chain anchor matches their document set.
 
 use super::*;
-use soroban_sdk::BytesN;
+use soroban_sdk::{Bytes, BytesN};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /// A deterministic 32-byte digest seeded by `seed` for test readability.
-fn digest(env: &Env, seed: u8) -> BytesN<32> {
+/// Returns `Bytes` (dynamic) so it can be passed to `bind_primary_attestation_hash`
+/// which accepts `Bytes` and validates length internally.
+fn digest(env: &Env, seed: u8) -> Bytes {
+    Bytes::from_array(env, &[seed; 32])
+}
+
+/// A deterministic 32-byte digest as `BytesN<32>` for use with `append_attestation_digest`
+/// which still takes the fixed type.
+fn digest_fixed(env: &Env, seed: u8) -> BytesN<32> {
     BytesN::from_array(env, &[seed; 32])
 }
 
@@ -39,7 +47,9 @@ fn test_bind_primary_hash_stores_and_reads() {
     let (client, _) = setup_with_init(&env);
     let d = digest(&env, 0xAB);
     client.bind_primary_attestation_hash(&d);
-    assert_eq!(client.get_primary_attestation_hash(), Some(d));
+    // getter returns BytesN<32>; check by converting our bytes to BytesN for comparison.
+    let stored = client.get_primary_attestation_hash().unwrap();
+    assert_eq!(stored, BytesN::from_array(&env, &[0xABu8; 32]));
 }
 
 /// Before any bind the getter returns `None`.
@@ -71,6 +81,19 @@ fn test_bind_primary_hash_different_digest_panics() {
     client.bind_primary_attestation_hash(&digest(&env, 0x02));
 }
 
+/// A second bind must fail with a typed contract error for the immutability contract.
+#[test]
+fn test_bind_primary_hash_second_call_fails_with_primary_attestation_already_bound() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let d = digest(&env, 0xAB);
+    client.bind_primary_attestation_hash(&d);
+    assert_contract_error(
+        client.try_bind_primary_attestation_hash(&d),
+        EscrowError::PrimaryAttestationAlreadyBound,
+    );
+}
+
 /// Non-admin caller must not be able to bind the primary hash.
 #[test]
 #[should_panic]
@@ -80,6 +103,48 @@ fn test_bind_primary_hash_non_admin_panics() {
     // Clear all mocks so auth is enforced for the next call.
     env.mock_auths(&[]);
     client.bind_primary_attestation_hash(&digest(&env, 0xFF));
+}
+
+// ---------------------------------------------------------------------------
+// #207: bind_primary_attestation_hash — hash length validation
+// ---------------------------------------------------------------------------
+
+/// A 31-byte digest must be rejected with InvalidAttestationHashLength (code 52).
+/// SHA-256 produces exactly 32 bytes; 31 bytes is an undersize / truncated digest.
+#[test]
+fn test_bind_primary_hash_31_bytes_rejected() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let short = Bytes::from_array(&env, &[0xABu8; 31]);
+    assert_contract_error(
+        client.try_bind_primary_attestation_hash(&short),
+        EscrowError::InvalidAttestationHashLength,
+    );
+}
+
+/// A 33-byte digest must be rejected with InvalidAttestationHashLength (code 52).
+/// An oversize input might indicate a misencoded digest (e.g. hex string bytes instead of raw).
+#[test]
+fn test_bind_primary_hash_33_bytes_rejected() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let long = Bytes::from_array(&env, &[0xCDu8; 33]);
+    assert_contract_error(
+        client.try_bind_primary_attestation_hash(&long),
+        EscrowError::InvalidAttestationHashLength,
+    );
+}
+
+/// An empty digest (0 bytes) must also be rejected.
+#[test]
+fn test_bind_primary_hash_empty_bytes_rejected() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let empty = Bytes::new(&env);
+    assert_contract_error(
+        client.try_bind_primary_attestation_hash(&empty),
+        EscrowError::InvalidAttestationHashLength,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +164,7 @@ fn test_append_log_empty_before_first_append() {
 fn test_append_single_entry_stored() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let d = digest(&env, 0x10);
+    let d = digest_fixed(&env, 0x10);
     client.append_attestation_digest(&d);
     let log = client.get_attestation_append_log();
     assert_eq!(log.len(), 1);
@@ -112,12 +177,12 @@ fn test_append_multiple_entries_ordered() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
     for i in 0u8..5 {
-        client.append_attestation_digest(&digest(&env, i));
+        client.append_attestation_digest(&digest_fixed(&env, i));
     }
     let log = client.get_attestation_append_log();
     assert_eq!(log.len(), 5);
     for i in 0u8..5 {
-        assert_eq!(log.get(i as u32).unwrap(), digest(&env, i));
+        assert_eq!(log.get(i as u32).unwrap(), digest_fixed(&env, i));
     }
 }
 
@@ -128,7 +193,7 @@ fn test_append_exactly_max_entries_succeeds() {
     let (client, _) = setup_with_init(&env);
     // MAX_ATTESTATION_APPEND_ENTRIES = 32, safely fits in u8.
     for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
-        client.append_attestation_digest(&digest(&env, i));
+        client.append_attestation_digest(&digest_fixed(&env, i));
     }
     assert_eq!(
         client.get_attestation_append_log().len(),
@@ -144,7 +209,7 @@ fn test_append_beyond_max_panics() {
     let (client, _) = setup_with_init(&env);
     // Append MAX+1 entries; the last one must panic.
     for i in 0u8..=(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
-        client.append_attestation_digest(&digest(&env, i));
+        client.append_attestation_digest(&digest_fixed(&env, i));
     }
 }
 
@@ -153,7 +218,7 @@ fn test_append_beyond_max_panics() {
 fn test_append_duplicate_digest_allowed() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let d = digest(&env, 0x42);
+    let d = digest_fixed(&env, 0x42);
     client.append_attestation_digest(&d);
     client.append_attestation_digest(&d);
     assert_eq!(client.get_attestation_append_log().len(), 2);
@@ -167,7 +232,7 @@ fn test_append_non_admin_panics() {
     let (client, _) = setup_with_init(&env);
     // Clear all mocks so auth is enforced for the next call.
     env.mock_auths(&[]);
-    client.append_attestation_digest(&digest(&env, 0x01));
+    client.append_attestation_digest(&digest_fixed(&env, 0x01));
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +253,7 @@ fn test_primary_bind_does_not_affect_append_log() {
 fn test_append_does_not_affect_primary_hash() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0xBB));
+    client.append_attestation_digest(&digest_fixed(&env, 0xBB));
     assert_eq!(client.get_primary_attestation_hash(), None);
 }
 
@@ -197,12 +262,14 @@ fn test_append_does_not_affect_primary_hash() {
 fn test_primary_and_append_coexist() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let primary = digest(&env, 0xCC);
-    client.bind_primary_attestation_hash(&primary);
+    client.bind_primary_attestation_hash(&digest(&env, 0xCC));
     for i in 0u8..4 {
-        client.append_attestation_digest(&digest(&env, i));
+        client.append_attestation_digest(&digest_fixed(&env, i));
     }
-    assert_eq!(client.get_primary_attestation_hash(), Some(primary));
+    assert_eq!(
+        client.get_primary_attestation_hash(),
+        Some(BytesN::from_array(&env, &[0xCCu8; 32]))
+    );
     assert_eq!(client.get_attestation_append_log().len(), 4);
 }
 
@@ -215,7 +282,7 @@ fn test_primary_and_append_coexist() {
 fn test_revoke_single_entry() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0xAA));
+    client.append_attestation_digest(&digest_fixed(&env, 0xAA));
 
     assert!(!client.is_attestation_revoked(&0));
     client.revoke_attestation_digest(&0);
@@ -227,8 +294,8 @@ fn test_revoke_single_entry() {
 fn test_revoke_later_index_does_not_affect_earlier() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x01));
-    client.append_attestation_digest(&digest(&env, 0x02));
+    client.append_attestation_digest(&digest_fixed(&env, 0x01));
+    client.append_attestation_digest(&digest_fixed(&env, 0x02));
 
     client.revoke_attestation_digest(&1);
     assert!(!client.is_attestation_revoked(&0));
@@ -241,7 +308,7 @@ fn test_revoke_all_entries() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
     for i in 0u8..5 {
-        client.append_attestation_digest(&digest(&env, i));
+        client.append_attestation_digest(&digest_fixed(&env, i));
     }
     for i in 0u8..5 {
         assert!(!client.is_attestation_revoked(&(i as u32)));
@@ -256,7 +323,7 @@ fn test_revoke_all_entries() {
 fn test_double_revoke_panics() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x42));
+    client.append_attestation_digest(&digest_fixed(&env, 0x42));
     client.revoke_attestation_digest(&0);
     client.revoke_attestation_digest(&0);
 }
@@ -277,7 +344,7 @@ fn test_revoke_out_of_range_panics() {
 fn test_revoke_at_log_len_panics() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x10));
+    client.append_attestation_digest(&digest_fixed(&env, 0x10));
     // log.len() == 1, so index 1 is out of range.
     client.revoke_attestation_digest(&1);
 }
@@ -297,7 +364,7 @@ fn test_is_revoked_empty_log() {
 fn test_revoke_non_admin_panics() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0xFF));
+    client.append_attestation_digest(&digest_fixed(&env, 0xFF));
     env.mock_auths(&[]);
     client.revoke_attestation_digest(&0);
 }
@@ -307,7 +374,7 @@ fn test_revoke_non_admin_panics() {
 fn test_revoke_preserves_log_entry() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let d = digest(&env, 0xBB);
+    let d = digest_fixed(&env, 0xBB);
     client.append_attestation_digest(&d);
     client.revoke_attestation_digest(&0);
     let log = client.get_attestation_append_log();
@@ -320,9 +387,11 @@ fn test_revoke_preserves_log_entry() {
 fn test_revoke_does_not_affect_primary_hash() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let primary = digest(&env, 0xCC);
-    client.bind_primary_attestation_hash(&primary);
-    client.append_attestation_digest(&digest(&env, 0xDD));
+    client.bind_primary_attestation_hash(&digest(&env, 0xCC));
+    client.append_attestation_digest(&digest_fixed(&env, 0xDD));
     client.revoke_attestation_digest(&0);
-    assert_eq!(client.get_primary_attestation_hash(), Some(primary));
+    assert_eq!(
+        client.get_primary_attestation_hash(),
+        Some(BytesN::from_array(&env, &[0xCCu8; 32]))
+    );
 }

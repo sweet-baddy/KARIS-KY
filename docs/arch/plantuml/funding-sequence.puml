@@ -1,0 +1,42 @@
+@startuml
+title Funding Flow Sequence
+
+participant Investor
+participant Contract
+participant Token
+participant Storage
+
+Investor -> Contract: fund(amount)
+activate Contract
+
+Contract -> Contract: validate_input()
+Contract -> Contract: check_legal_hold()
+
+Contract -> Investor: require_auth()
+Investor -> Contract: ✓ authorized
+
+Contract -> Token: transfer_from(investor, contract, amount)
+activate Token
+Token -> Contract: ✓ transferred
+deactivate Token
+
+Contract -> Storage: write InvestorContribution(investor) += amount
+activate Storage
+Storage -> Contract: ✓ written
+deactivate Storage
+
+Contract -> Storage: read funded_amount
+activate Storage
+Storage -> Contract: current funded_amount
+deactivate Storage
+
+alt funded_amount >= funding_target
+  Contract -> Storage: write status = 1 (FUNDED)
+  Storage -> Contract: ✓
+  Contract -> Contract: emit EscrowFunded event
+end
+
+Contract -> Investor: ✓ success
+deactivate Contract
+
+@enduml

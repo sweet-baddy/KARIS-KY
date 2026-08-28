@@ -1,0 +1,528 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "karis-ky Escrow Contract ABI",
+  "description": "Machine-readable specification of the karis-ky escrow smart contract interface for SDK consumption. Auto-generated from contract source.",
+  "contract": {
+    "name": "LiquifactEscrow",
+    "package": "karis_ky_escrow",
+    "description": "Holds investor funds for an invoice until settlement on Stellar Soroban",
+    "schema_version": 6,
+    "interface_version": 1
+  },
+  "entrypoints": [
+    {
+      "name": "init",
+      "description": "Create an invoice escrow; binds funding token, treasury, optional registry. One-shot — panics if called twice.",
+      "auth": "admin",
+      "params": [
+        { "name": "admin", "type": "Address", "description": "Governance address; controls holds, maturity, admin transfer" },
+        { "name": "invoice_id", "type": "String", "description": "ASCII alphanumeric + underscore, max 32 chars (e.g. 'INV001')" },
+        { "name": "sme_address", "type": "Address", "description": "Invoice issuer; authorized to call settle and withdraw" },
+        { "name": "amount", "type": "i128", "description": "Funding target in token base units (7 decimals)" },
+        { "name": "yield_bps", "type": "i64", "description": "Base annualized yield in basis points (800 = 8%); range 0..=10_000" },
+        { "name": "maturity", "type": "u64", "description": "Unix timestamp after which settle is allowed; 0 = no maturity gate" },
+        { "name": "funding_token", "type": "Address", "description": "SEP-41 token contract address bound to this escrow (immutable)" },
+        { "name": "registry", "type": "Option<Address>", "description": "Optional registry hint for indexers; not an on-chain authority" },
+        { "name": "treasury", "type": "Address", "description": "Receives terminal dust sweeps; immutable after init" },
+        { "name": "yield_tiers", "type": "Option<Vec<YieldTier>>", "description": "Optional tiered yield ladder; null to omit" },
+        { "name": "min_contribution", "type": "Option<i128>", "description": "Minimum per-call funding floor; null for no floor" },
+        { "name": "max_unique_investors", "type": "Option<u32>", "description": "Cap on distinct investor addresses; null for unlimited" },
+        { "name": "max_per_investor", "type": "Option<i128>", "description": "Per-investor contribution cap; null for unlimited" },
+        { "name": "legal_hold_clear_delay", "type": "Option<u64>", "description": "Minimum delay (seconds) for two-phase legal hold clear" },
+        { "name": "funding_deadline", "type": "Option<u64>", "description": "Ledger timestamp after which funding is rejected" },
+        { "name": "yield_slippage_threshold", "type": "Option<i64>", "description": "Bps threshold for yield slippage detection (0..=10_000)" }
+      ],
+      "returns": { "type": "InvoiceEscrow", "description": "The initialized escrow state" }
+    },
+    {
+      "name": "fund",
+      "description": "Record investor principal. Moves status open→funded when target met. Use for ALL deposits after first from a given address.",
+      "auth": "investor",
+      "params": [
+        { "name": "investor", "type": "Address", "description": "Investor address whose contribution is recorded" },
+        { "name": "amount", "type": "i128", "description": "Principal amount in token base units; must be positive" }
+      ],
+      "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state" }
+    },
+    {
+      "name": "fund_with_commitment",
+      "description": "First deposit only per investor. Selects tiered yield based on lock commitment.",
+      "auth": "investor",
+      "params": [
+        { "name": "investor", "type": "Address", "description": "Investor address (first deposit only for this address)" },
+        { "name": "amount", "type": "i128", "description": "Principal amount in token base units" },
+        { "name": "committed_lock_secs", "type": "u64", "description": "Lock duration in seconds; selects tier from YieldTierTable" }
+      ],
+      "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state" }
+    },
+    {
+      "name": "fund_batch",
+      "description": "Process multiple investor contributions in a single call. Max 50 entries.",
+      "auth": "per-investor",
+      "params": [
+        { "name": "entries", "type": "Vec<(Address, i128)>", "description": "Vector of (investor_address, amount) pairs; max 50" }
+      ],
+      "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state" }
+    },
+    {
+      "name": "batch_fund",
+      "description": "Atomic multi-investor funding in a single transaction (FEAT-001). Requires per-investor auth for each entry. Emits per-entry EscrowFunded/FundReceived events and one BatchFundCompleted summary event. Max 50 entries.",
+      "auth": "per-investor",
+      "params": [
+        { "name": "contributions", "type": "Vec<(Address, i128)>", "description": "Vector of (investor_address, amount) pairs; max 50. Each entry requires that investor's require_auth()." }
+      ],
+      "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state after all contributions are applied" }
+    },
+    {
+      "name": "settle",
+      "description": "Mark a funded escrow as settled (status funded→settled). SME auth required; maturity enforced.",
+      "auth": "sme_address",
+      "params": [],
+      "returns": { "type": "InvoiceEscrow", "description": "Settled escrow state" }
+    },
+    {
+      "name": "withdraw",
+      "description": "SME pulls funded liquidity (status funded→withdrawn). Alternative terminal path.",
+      "auth": "sme_address",
+      "params": [],
+      "returns": { "type": "InvoiceEscrow", "description": "Withdrawn escrow state" }
+    },
+    {
+      "name": "claim_investor_payout",
+      "description": "Records a payout claim marker after settlement. Accounting record only.",
+      "auth": "investor",
+      "params": [
+        { "name": "investor", "type": "Address", "description": "Investor address recording the claim" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "cancel_funding",
+      "description": "Admin cancels the escrow before it was funded. Investors may then refund.",
+      "auth": "admin",
+      "params": [],
+      "returns": { "type": "InvoiceEscrow", "description": "Cancelled escrow state" }
+    },
+    {
+      "name": "refund",
+      "description": "Investor reclaims principal after cancellation. Contribution zeroed before transfer.",
+      "auth": "investor",
+      "params": [
+        { "name": "investor", "type": "Address", "description": "Investor address reclaiming funds" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "sweep_terminal_dust",
+      "description": "Treasury sweeps rounding residue from a terminal escrow. Capped at MAX_DUST_SWEEP_AMOUNT.",
+      "auth": "treasury",
+      "params": [
+        { "name": "amount", "type": "i128", "description": "Sweep amount; max 100_000_000 base units" }
+      ],
+      "returns": { "type": "i128", "description": "Effective amount swept" }
+    },
+    {
+      "name": "set_legal_hold",
+      "description": "Admin activates or clears compliance hold. Blocks risk-bearing transitions when active.",
+      "auth": "admin",
+      "params": [
+        { "name": "active", "type": "bool", "description": "true = enable hold, false = clear hold" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "clear_legal_hold",
+      "description": "Admin convenience wrapper to clear legal hold. Respects two-phase clear delay if configured.",
+      "auth": "admin",
+      "params": [],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "request_clear_legal_hold",
+      "description": "Request to clear legal hold; starts the two-phase delay timer.",
+      "auth": "admin",
+      "params": [],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "update_maturity",
+      "description": "Admin updates the maturity timestamp. Only allowed in open status.",
+      "auth": "admin",
+      "params": [
+        { "name": "new_maturity", "type": "u64", "description": "New unix timestamp for maturity gate" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "update_funding_target",
+      "description": "Admin updates the funding target. Must be >= funded_amount; only in open status.",
+      "auth": "admin",
+      "params": [
+        { "name": "new_target", "type": "i128", "description": "New funding target; must be positive and >= funded_amount" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "lower_max_unique_investors",
+      "description": "Admin lowers the investor cap. Must be strictly lower and >= current funder count.",
+      "auth": "admin",
+      "params": [
+        { "name": "new_cap", "type": "u32", "description": "New cap; must be strictly less than current cap" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "propose_admin",
+      "description": "Admin proposes a successor admin. Pending admin must accept to complete handover.",
+      "auth": "admin",
+      "params": [
+        { "name": "new_admin", "type": "Address", "description": "Proposed new admin; must differ from current" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "accept_admin",
+      "description": "Pending admin accepts the role. Finalizes the admin handover.",
+      "auth": "pending_admin",
+      "params": [],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "migrate",
+      "description": "Schema version gate. Typed errors on all paths in current release — extend before calling.",
+      "auth": "none",
+      "params": [
+        { "name": "from_version", "type": "u32", "description": "Version to migrate from" }
+      ],
+      "returns": { "type": "null", "description": "No return value (panics on all paths)" }
+    },
+    {
+      "name": "set_investors_allowlisted",
+      "description": "Admin batch-sets allowlist status for investors. Max 32 per batch.",
+      "auth": "admin",
+      "params": [
+        { "name": "investors", "type": "Vec<Address>", "description": "Addresses to allowlist/block (max 32)" },
+        { "name": "allowed", "type": "bool", "description": "true = add to allowlist, false = remove" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "set_allowlist_active",
+      "description": "Admin toggles the allowlist gate. When active, only allowlisted investors may fund.",
+      "auth": "admin",
+      "params": [
+        { "name": "active", "type": "bool", "description": "true = enforce allowlist, false = open funding" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "bind_primary_attestation_hash",
+      "description": "Admin sets a single-write 32-byte attestation digest (e.g. SHA-256 of legal bundle).",
+      "auth": "admin",
+      "params": [
+        { "name": "digest", "type": "BytesN<32>", "description": "32-byte hash digest; single-set" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "append_attestation_digest",
+      "description": "Admin appends to bounded attestation audit log. Max 32 entries.",
+      "auth": "admin",
+      "params": [
+        { "name": "digest", "type": "BytesN<32>", "description": "32-byte digest to append" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "revoke_attestation_digest",
+      "description": "Admin revokes an attestation at the given log index. Preserves original for audit.",
+      "auth": "admin",
+      "params": [
+        { "name": "index", "type": "u32", "description": "Index in attestation append log to revoke" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "record_sme_collateral_commitment",
+      "description": "SME records collateral pledge metadata. Record-only — not proof of custody.",
+      "auth": "sme_address",
+      "params": [
+        { "name": "asset", "type": "Symbol", "description": "Off-chain asset symbol (cannot be empty)" },
+        { "name": "amount", "type": "i128", "description": "Reported collateral amount; must be positive" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "rotate_beneficiary",
+      "description": "Change the SME (beneficiary) address. Blocked by legal hold; only before settlement.",
+      "auth": "sme_address + admin",
+      "params": [
+        { "name": "new_sme", "type": "Address", "description": "New beneficiary address; must differ from current" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "verify_asset_custody",
+      "description": "Compare contract's token balance to recorded funded_amount. Returns discrepancy.",
+      "auth": "admin",
+      "params": [],
+      "returns": { "type": "i128", "description": "Signed discrepancy: contract_balance - funded_amount" }
+    },
+    {
+      "name": "init_from_template",
+      "description": "Initialize an escrow from a named template (fast, standard, conservative, or custom).",
+      "auth": "admin",
+      "params": [
+        { "name": "admin", "type": "Address", "description": "Governance address" },
+        { "name": "template_name", "type": "String", "description": "Template name: 'fast', 'standard', 'conservative', or custom" },
+        { "name": "invoice_id", "type": "String", "description": "Invoice identifier" },
+        { "name": "sme_address", "type": "Address", "description": "Invoice issuer" },
+        { "name": "amount", "type": "i128", "description": "Invoice face value" },
+        { "name": "funding_token", "type": "Address", "description": "SEP-41 funding token" },
+        { "name": "treasury", "type": "Address", "description": "Treasury address" },
+        { "name": "registry", "type": "Option<Address>", "description": "Optional registry hint" }
+      ],
+      "returns": { "type": "InvoiceEscrow", "description": "The initialized escrow state" }
+    },
+    {
+      "name": "register_template",
+      "description": "Admin stores a named custom template for later use by init_from_template.",
+      "auth": "admin",
+      "params": [
+        { "name": "name", "type": "String", "description": "Template name" },
+        { "name": "template", "type": "EscrowTemplate", "description": "Template configuration" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    }
+  ],
+  "read_only_entrypoints": [
+    { "name": "get_escrow", "description": "Read current escrow state", "returns": { "type": "InvoiceEscrow" } },
+    { "name": "get_version", "description": "Read stored schema version (DataKey::Version)", "returns": { "type": "u32" } },
+    { "name": "get_interface_version", "description": "Read contract interface version constant", "returns": { "type": "u32" } },
+    { "name": "get_funding_token", "description": "Read immutable funding token address", "returns": { "type": "Address" } },
+    { "name": "get_treasury", "description": "Read immutable treasury address", "returns": { "type": "Address" } },
+    { "name": "get_registry_ref", "description": "Read optional registry hint (null when unset)", "returns": { "type": "Option<Address>" } },
+    { "name": "get_pending_admin", "description": "Read pending admin in handover", "returns": { "type": "Option<Address>" } },
+    { "name": "get_legal_hold", "description": "Check if legal hold is active", "returns": { "type": "bool" } },
+    { "name": "get_contribution", "description": "Read principal for one investor", "params": [{ "name": "investor", "type": "Address" }], "returns": { "type": "i128" } },
+    { "name": "get_unique_funder_count", "description": "Count of distinct investor addresses", "returns": { "type": "u32" } },
+    { "name": "get_funding_close_snapshot", "description": "Read immutable funding-close snapshot (null before funded)", "returns": { "type": "Option<FundingCloseSnapshot>" } },
+    { "name": "get_investor_yield_bps", "description": "Read effective yield for one investor", "params": [{ "name": "investor", "type": "Address" }], "returns": { "type": "i64" } },
+    { "name": "get_investor_claim_not_before", "description": "Read commitment lock timestamp for one investor", "params": [{ "name": "investor", "type": "Address" }], "returns": { "type": "u64" } },
+    { "name": "is_investor_claimed", "description": "Check if investor has recorded a claim", "params": [{ "name": "investor", "type": "Address" }], "returns": { "type": "bool" } },
+    { "name": "is_investor_refunded", "description": "Check if investor has been refunded", "params": [{ "name": "investor", "type": "Address" }], "returns": { "type": "bool" } },
+    { "name": "get_min_contribution_floor", "description": "Read configured minimum contribution floor", "returns": { "type": "i128" } },
+    { "name": "get_max_unique_investors_cap", "description": "Read configured investor cap (null when unlimited)", "returns": { "type": "Option<u32>" } },
+    { "name": "get_max_per_investor_cap", "description": "Read configured per-investor cap (null when unlimited)", "returns": { "type": "Option<i128>" } },
+    { "name": "get_escrow_summary", "description": "Composite read of escrow state, legal hold, snapshot, attestations, collateral", "returns": { "type": "EscrowSummary" } },
+    { "name": "get_sme_collateral_commitment", "description": "Read SME collateral metadata (null when never recorded)", "returns": { "type": "Option<SmeCollateralCommitment>" } },
+    { "name": "get_primary_attestation_hash", "description": "Read primary attestation digest (null when unset)", "returns": { "type": "Option<BytesN<32>>" } },
+    { "name": "get_attestation_append_log", "description": "Read attestation audit log (empty array when unset)", "returns": { "type": "Vec<BytesN<32>>" } },
+    { "name": "get_template", "description": "Read a template by name; returns null when unknown", "params": [{ "name": "name", "type": "String" }], "returns": { "type": "Option<EscrowTemplate>" } },
+    { "name": "has_maturity_lock", "description": "Check if escrow has a configured maturity time lock", "returns": { "type": "bool" } }
+  ],
+  "events": [
+    { "name": "EscrowInitialized", "topics": ["name"], "description": "Emitted after successful init" },
+    { "name": "EscrowFunded", "topics": ["name", "invoice_id", "investor"], "description": "Emitted on each fund/fund_with_commitment call" },
+    { "name": "FundReceived", "topics": ["name", "invoice_id", "actor"], "description": "Versioned counterpart to EscrowFunded carrying actor + timestamp" },
+    { "name": "BatchFundCompleted", "topics": ["name", "invoice_id"], "description": "Emitted once by batch_fund after all entries are processed; carries total_funded_amount, investor_count, escrow_funded_amount, and status" },
+    { "name": "EscrowSettled", "topics": ["name", "invoice_id"], "description": "Emitted when settle succeeds" },
+    { "name": "EscrowPartialSettle", "topics": ["name", "invoice_id"], "description": "Emitted when partial settlement is recorded" },
+    { "name": "SmeWithdrew", "topics": ["name", "invoice_id"], "description": "Emitted when SME withdraws liquidity" },
+    { "name": "InvestorPayoutClaimed", "topics": ["name", "investor", "invoice_id"], "description": "Emitted when investor records a claim" },
+    { "name": "FundingCancelled", "topics": ["name", "invoice_id"], "description": "Emitted when admin cancels funding" },
+    { "name": "InvestorRefundedEvt", "topics": ["name", "investor", "invoice_id"], "description": "Emitted when investor receives a refund" },
+    { "name": "TreasuryDustSwept", "topics": ["name"], "description": "Emitted on terminal dust sweep" },
+    { "name": "LegalHoldChanged", "topics": ["name", "invoice_id"], "description": "Emitted when legal hold is toggled" },
+    { "name": "LegalHoldClearRequested", "topics": ["name", "invoice_id"], "description": "Emitted when clear hold is requested" },
+    { "name": "MaturityUpdatedEvent", "topics": ["name", "invoice_id"], "description": "Emitted when maturity is updated" },
+    { "name": "FundingTargetUpdated", "topics": ["name", "invoice_id"], "description": "Emitted when funding target changes" },
+    { "name": "MaxUniqueInvestorsCapLowered", "topics": ["name", "invoice_id"], "description": "Emitted when investor cap is lowered" },
+    { "name": "AdminTransferredEvent", "topics": ["name", "invoice_id"], "description": "Emitted on admin handover" },
+    { "name": "AdminProposedEvent", "topics": ["name", "invoice_id"], "description": "Emitted when admin is proposed" },
+    { "name": "BeneficiaryRotated", "topics": ["name", "invoice_id"], "description": "Emitted when SME address changes" },
+    { "name": "CollateralRecordedEvt", "topics": ["name"], "description": "Emitted when SME records collateral metadata" },
+    { "name": "PrimaryAttestationBound", "topics": ["name"], "description": "Emitted when primary attestation hash is bound" },
+    { "name": "AttestationDigestAppended", "topics": ["name"], "description": "Emitted when attestation digest is appended" },
+    { "name": "AttestationDigestRevoked", "topics": ["name"], "description": "Emitted when attestation digest is revoked" },
+    { "name": "AllowlistEnabledChanged", "topics": ["name"], "description": "Emitted when allowlist gate is toggled" },
+    { "name": "InvestorAllowlistChanged", "topics": ["name"], "description": "Emitted when investor allowlist status changes" },
+    { "name": "AssetCustodyVerified", "topics": ["name"], "description": "Emitted on verify_asset_custody call" },
+    { "name": "ContractUpgraded", "topics": ["name", "invoice_id"], "description": "Emitted on contract upgrade" },
+    { "name": "ErrorDiagnosticEmitted", "topics": ["name"], "description": "Emitted when a typed error occurs with diagnostic info" },
+    { "name": "YieldSlippageWarning", "topics": ["name", "investor", "invoice_id"], "description": "Emitted when yield slippage exceeds threshold" }
+  ],
+  "types": {
+    "InvoiceEscrow": {
+      "description": "Full escrow snapshot persisted on-chain",
+      "fields": [
+        { "name": "invoice_id", "type": "Symbol", "description": "Validated ASCII [A-Za-z0-9_], max 32 chars" },
+        { "name": "admin", "type": "Address", "description": "Governance address" },
+        { "name": "sme_address", "type": "Address", "description": "Invoice issuer / beneficiary" },
+        { "name": "amount", "type": "i128", "description": "Original invoice face value" },
+        { "name": "funding_target", "type": "i128", "description": "Current funding target; may be updated while open" },
+        { "name": "funded_amount", "type": "i128", "description": "Running total of investor principal" },
+        { "name": "yield_bps", "type": "i64", "description": "Base annualized yield in basis points" },
+        { "name": "maturity", "type": "u64", "description": "Ledger timestamp; 0 = no maturity gate" },
+        { "name": "status", "type": "u32", "description": "0=open, 1=funded, 2=settled, 3=withdrawn, 4=cancelled" }
+      ]
+    },
+    "YieldTier": {
+      "description": "One step in the optional tier ladder; immutable after init",
+      "fields": [
+        { "name": "min_lock_secs", "type": "u64", "description": "Minimum lock duration in seconds" },
+        { "name": "yield_bps", "type": "i64", "description": "Effective yield in basis points" }
+      ]
+    },
+    "FundingCloseSnapshot": {
+      "description": "Captured once when escrow first becomes funded; immutable pro-rata denominator",
+      "fields": [
+        { "name": "total_principal", "type": "i128", "description": "Sum of principal at close" },
+        { "name": "funding_target", "type": "i128", "description": "Target at close time" },
+        { "name": "closed_at_ledger_timestamp", "type": "u64", "description": "Ledger timestamp when snapshot was taken" },
+        { "name": "closed_at_ledger_sequence", "type": "u32", "description": "Ledger sequence at snapshot" }
+      ]
+    },
+    "SmeCollateralCommitment": {
+      "description": "SME-reported collateral metadata for off-chain risk review (record-only)",
+      "fields": [
+        { "name": "asset", "type": "Symbol", "description": "Off-chain asset symbol" },
+        { "name": "amount", "type": "i128", "description": "Reported collateral amount" },
+        { "name": "recorded_at", "type": "u64", "description": "Ledger timestamp when recorded" }
+      ]
+    },
+    "ErrorDiagnostic": {
+      "description": "Structured error information emitted alongside contract errors",
+      "fields": [
+        { "name": "error_code", "type": "u32", "description": "Numeric error code matching EscrowError" },
+        { "name": "message", "type": "String", "description": "Human-readable error message" },
+        { "name": "recovery_action", "type": "String", "description": "Suggested recovery action" },
+        { "name": "context", "type": "Option<String>", "description": "Additional contextual information" }
+      ]
+    },
+    "EscrowTemplate": {
+      "description": "Pre-configured escrow template for init_from_template",
+      "fields": [
+        { "name": "yield_bps", "type": "i64", "description": "Base yield in basis points" },
+        { "name": "maturity", "type": "u64", "description": "Maturity timestamp (0 = none)" },
+        { "name": "yield_tiers", "type": "Option<Vec<YieldTier>>", "description": "Optional tier ladder" },
+        { "name": "min_contribution", "type": "Option<i128>", "description": "Min contribution floor" },
+        { "name": "max_unique_investors", "type": "Option<u32>", "description": "Investor cap" },
+        { "name": "funding_deadline_days", "type": "Option<u32>", "description": "Funding window in days" }
+      ]
+    }
+  },
+  "constants": {
+    "SCHEMA_VERSION": { "value": 6, "type": "u32", "description": "Current on-chain storage schema version" },
+    "CONTRACT_INTERFACE_VERSION": { "value": 1, "type": "u32", "description": "Public entrypoint ABI surface version" },
+    "MAX_INVOICE_ID_STRING_LEN": { "value": 32, "type": "u32", "description": "Max UTF-8 byte length for invoice_id string" },
+    "MAX_ATTESTATION_APPEND_ENTRIES": { "value": 32, "type": "u32", "description": "Max attestation append log entries" },
+    "MAX_INVESTOR_ALLOWLIST_BATCH": { "value": 32, "type": "u32", "description": "Max allowlist batch mutation size" },
+    "MAX_FUND_BATCH": { "value": 50, "type": "u32", "description": "Max fund_batch entries per call" },
+    "MAX_DUST_SWEEP_AMOUNT": { "value": 100000000, "type": "i128", "description": "Max dust sweep per call in base units" },
+    "INSTANCE_TTL_MIN_EXTENSION_LEDGERS": { "value": 3600, "type": "u32", "description": "Min instance storage TTL extension (~1h)" },
+    "PERSISTENT_TTL_MIN_EXTENSION_LEDGERS": { "value": 3600, "type": "u32", "description": "Min persistent storage TTL extension (~1h)" }
+  },
+  "error_codes": {
+    "groups": {
+      "init_pricing": { "range": "1-13", "description": "Initialization, invoice id, yield tiers, optional caps" },
+      "uninitialized": { "range": "20-22", "description": "Escrow or required addresses not configured" },
+      "dust_sweep": { "range": "30-42", "description": "Terminal dust sweep and token transfer invariants" },
+      "attestation": { "range": "50-51", "description": "Primary hash binding and append-only digest log" },
+      "sme_collateral": { "range": "60-62", "description": "Off-chain collateral metadata record" },
+      "admin_validation": { "range": "70-83", "description": "Allowlist batch, funding target, investor cap, maturity, admin handover, batch funding" },
+      "migration": { "range": "90-92", "description": "migrate version checks" },
+      "funding": { "range": "100-111", "description": "Investor deposits, batch funding, and contribution limits" },
+      "settlement_payout": { "range": "120-129", "description": "Settle, withdraw, investor claims, payout math" },
+      "cancel_refund": { "range": "140-143", "description": "Cancel funding and investor refunds" },
+      "legal_hold_clear": { "range": "150-152", "description": "Delayed compliance-hold lift workflow" },
+      "beneficiary_rotation": { "range": "160-164", "description": "Governed SME rotation, admin handover, funding deadline" }
+    },
+    "codes": {
+      "1": "AmountMustBePositive",
+      "2": "YieldBpsOutOfRange",
+      "3": "EscrowAlreadyInitialized",
+      "4": "InvoiceIdInvalidLength",
+      "5": "InvoiceIdInvalidCharset",
+      "6": "MinContributionNotPositive",
+      "7": "MinContributionExceedsAmount",
+      "8": "MaxUniqueInvestorsNotPositive",
+      "9": "MaxPerInvestorNotPositive",
+      "10": "TierYieldOutOfRange",
+      "11": "TierYieldBelowBase",
+      "12": "TierLockNotIncreasing",
+      "13": "TierYieldNotNonDecreasing",
+      "20": "EscrowNotInitialized",
+      "21": "FundingTokenNotSet",
+      "22": "TreasuryNotSet",
+      "30": "LegalHoldBlocksTreasuryDustSweep",
+      "31": "SweepAmountNotPositive",
+      "32": "SweepAmountExceedsMax",
+      "33": "DustSweepNotTerminal",
+      "34": "NoFundingTokenBalanceToSweep",
+      "35": "EffectiveSweepAmountZero",
+      "36": "TransferAmountNotPositive",
+      "37": "InsufficientTokenBalanceBeforeTransfer",
+      "38": "SenderBalanceUnderflow",
+      "39": "RecipientBalanceUnderflow",
+      "40": "SenderBalanceDeltaMismatch",
+      "41": "RecipientBalanceDeltaMismatch",
+      "42": "SweepExceedsLiabilityFloor",
+      "50": "PrimaryAttestationAlreadyBound",
+      "51": "AttestationAppendLogCapacityReached",
+      "60": "CollateralAmountNotPositive",
+      "61": "CollateralAssetEmpty",
+      "62": "CollateralTimestampBackwards",
+      "70": "InvestorBatchEmpty",
+      "71": "InvestorBatchTooLarge",
+      "72": "TargetNotPositive",
+      "73": "TargetUpdateNotOpen",
+      "74": "TargetBelowFundedAmount",
+      "75": "CapLowerNotOpen",
+      "76": "NoInvestorCapConfigured",
+      "77": "NewCapNotLower",
+      "78": "NewCapBelowCurrentFunderCount",
+      "79": "MaturityUpdateNotOpen",
+      "80": "NewAdminSameAsCurrent",
+      "82": "FundingBatchEmpty",
+      "83": "FundingBatchTooLarge",
+      "90": "MigrationVersionMismatch",
+      "91": "AlreadyCurrentSchemaVersion",
+      "92": "NoMigrationPath",
+      "100": "FundingAmountNotPositive",
+      "101": "FundingBelowMinContribution",
+      "102": "LegalHoldBlocksFunding",
+      "103": "EscrowNotOpenForFunding",
+      "104": "InvestorNotAllowlisted",
+      "105": "InvestorContributionOverflow",
+      "106": "InvestorContributionExceedsCap",
+      "107": "UniqueInvestorCapReached",
+      "108": "TieredSecondDeposit",
+      "109": "InvestorClaimTimeOverflow",
+      "110": "FundedAmountOverflow",
+      "111": "CommitmentLockExceedsMaturity",
+      "120": "LegalHoldBlocksSettlement",
+      "121": "SettlementNotFunded",
+      "122": "MaturityNotReached",
+      "123": "LegalHoldBlocksWithdrawal",
+      "124": "WithdrawalNotFunded",
+      "125": "LegalHoldBlocksInvestorClaims",
+      "126": "NoContributionToClaim",
+      "127": "InvestorClaimNotSettled",
+      "128": "InvestorCommitmentLockNotExpired",
+      "129": "ComputePayoutArithmeticOverflow",
+      "140": "LegalHoldBlocksCancelFunding",
+      "141": "CancelFundingNotOpen",
+      "142": "RefundNotCancelled",
+      "143": "NoContributionToRefund",
+      "150": "LegalHoldClearRequestMissing",
+      "151": "LegalHoldClearNotReady",
+      "152": "LegalHoldClearDelayOverflow",
+      "160": "LegalHoldBlocksBeneficiaryRotation",
+      "161": "RotationNotOpen",
+      "162": "NewSmeSameAsCurrent",
+      "163": "NoPendingAdmin",
+      "164": "FundingDeadlinePassed"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+@startuml
+title Contract Architecture - Components
+
+[LiquifactEscrow\nContract] as contract
+[ValidationModule] as validation
+[ExternalCalls
+(Token Interface)] as ext
+[DataStore
+(Instance)] as inst_store
+[DataStore
+(Persistent)] as pers_store
+[TokenContract
+(SEP-41)] as token
+
+contract --> validation : uses
+contract --> ext : delegates to
+contract --> inst_store : read/write
+contract --> pers_store : read/write
+ext --> token : transfer_from()
+
+database "Storage Keys" {
+  [Escrow State]
+  [Version]
+  [Per-Investor Contributions]
+  [Yield Tiers]
+  [Attestation Log]
+}
+
+@enduml

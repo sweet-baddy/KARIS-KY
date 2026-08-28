@@ -1,0 +1,39 @@
+@startuml
+title Storage Model - DataKey Catalog
+
+package InstanceStorage <<Rectangle>> {
+  class Escrow
+  class Version
+  class LegalHold
+  class FundingCloseSnapshot
+  class YieldTierTable
+}
+
+package PersistentStorage <<Rectangle>> {
+  class InvestorContribution
+  class InvestorEffectiveYield
+  class InvestorClaimNotBefore
+  class InvestorClaimed
+  class InvestorAllowlisted
+  class InvestorRefunded
+}
+
+Escrow : invoice_id: Symbol
+Escrow : admin: Address
+Escrow : sme_address: Address
+Escrow : amount: i128
+Escrow : funding_target: i128
+Escrow : funded_amount: i128
+Escrow : yield_bps: i64
+Escrow : maturity: u64
+Escrow : status: u32 (0-4)
+
+InvestorContribution : per_address_value: i128
+InvestorEffectiveYield : chosen_yield_bps: i64
+InvestorClaimNotBefore : lock_until_timestamp: u64
+
+Escrow -- InvestorContribution
+Escrow -- InvestorEffectiveYield
+Escrow -- InvestorClaimNotBefore
+
+@enduml

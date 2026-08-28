@@ -1,0 +1,16 @@
+---
+source: escrow/tests/snapshots.rs
+assertion_line: 195
+expression: snapshot
+---
+{
+  "invoice_id": "Symbol(INV_SNAP_003)",
+  "admin_debug": "Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4)",
+  "sme_address_debug": "Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M)",
+  "amount": 100000000000,
+  "funding_target": 100000000000,
+  "funded_amount": 100000000000,
+  "yield_bps": 800,
+  "maturity": 0,
+  "status": 1
+}

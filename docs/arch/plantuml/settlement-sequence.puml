@@ -1,0 +1,38 @@
+@startuml
+title Settlement Flow Sequence
+
+participant SME
+participant Contract
+participant Registry
+participant Storage
+
+SME -> Contract: settle()
+activate Contract
+
+Contract -> Contract: check_legal_hold()
+Contract -> Contract: check_status == FUNDED
+Contract -> Storage: read maturity
+activate Storage
+Storage -> Contract: maturity timestamp
+deactivate Storage
+
+Contract -> Contract: check_ledger_time >= maturity
+
+Contract -> SME: require_auth()
+SME -> Contract: ✓ authorized
+
+Contract -> Storage: write status = 2 (SETTLED)
+activate Storage
+Storage -> Contract: ✓
+deactivate Storage
+
+Contract -> Contract: emit EscrowSettled event
+Contract -> SME: ✓ success
+deactivate Contract
+
+note right of SME
+  Now SME can withdraw()
+  and investors can claim_investor_payout()
+end note
+
+@enduml

@@ -29,6 +29,7 @@ Every state-mutating entrypoint and the identity required to authorize it.
 | `withdraw` | `escrow.sme_address` | `escrow.sme_address.require_auth()` | `status == 1`; sets `status = 3` |
 | `claim_investor_payout` | `investor` (caller-supplied) | `investor.require_auth()` | `status == 2`; contribution > 0; claim-lock gate |
 | `sweep_terminal_dust` | `treasury` | `treasury.require_auth()` | `status == 2 or 3`; amount ≤ `MAX_DUST_SWEEP_AMOUNT` |
+| `verify_asset_custody` | `escrow.admin` | `escrow.admin.require_auth()` | Admin-triggered reconciliation check; suitable for manual audits or external schedulers |
 | `migrate` | **none** | *(no `require_auth`)* | **Always panics** on all current paths — safe now, dangerous if logic is added without adding an auth guard (see §5.1) |
 
 ### Read-only entrypoints
@@ -184,6 +185,15 @@ This creates a window where `funded_amount` > actual token balance (unfunded com
 
 `funded_amount` is a commitment record, not a token balance assertion. Integrations that custody principal on-chain must enforce that token transfers and `fund()` calls are atomic (e.g., via an outer orchestrator contract or a Soroban transaction with both operations). Without this, `funded_amount` can overstate actual holdings, and `sweep_terminal_dust` could drain funds that were never genuinely deposited.
 
+### 5.2a Reconciliation procedure for custody audits
+
+Operators should reconcile the escrow's recorded funding with its actual on-chain balance on a cadence that matches the custody workflow. The admin can call `verify_asset_custody()` to compare the contract's current funding-token balance with the stored `funded_amount`; the call returns a signed discrepancy (`contract_balance - recorded_funded_amount`) and emits an `AssetCustodyVerified` event for off-chain indexing.
+
+- Positive discrepancy: the contract holds more than the recorded funded amount (for example, a stray transfer or airdrop).
+- Negative discrepancy: the contract holds less than the recorded funded amount (for example, a missed transfer or partial withdrawal).
+- Use the result with custody statements, bridge receipts, or bank reconciliations before settlement, withdrawal, or a dust sweep.
+- External schedulers or trigger systems can invoke the same entrypoint automatically so reconciliation becomes part of the operating runbook.
+
 ### 5.3 Legal hold has no on-chain expiry
 
 `LegalHold` is a boolean toggled exclusively by the **current** `escrow.admin`.
@@ -224,6 +234,35 @@ See `docs/escrow-legal-hold.md` § "Failure mode: hold + lost admin key".
 ### 5.9 InvestorClaimed is an event marker, not a payment proof
 
 `claim_investor_payout` marks an investor as claimed and emits `InvestorPayoutClaimed`. It does not transfer tokens. Off-chain systems that release principal or yield based on this event must implement their own idempotency and replay guards. A re-emitted or replayed event must not trigger a second disbursement.
+
+---
+
+## 7. Timing and side-channel threat model
+
+### 7.1 Threat model
+
+- This escrow contract does not process confidential inputs. All on-chain entrypoint parameters, investor contributions, yield tiers, funding amounts, and ledger timestamps are either publicly observable on the ledger or controlled by the transaction sender.
+- Soroban contract storage and transaction inputs are public; there is no private secret within this escrow logic that requires constant-time protection.
+- The primary security goal is correctness and invariant enforcement, not side-channel secrecy.
+
+### 7.2 Value-dependent execution
+
+- `effective_yield_for_commitment()` iterates the immutable `YieldTierTable` and selects the best tier based on `committed_lock_secs`. The tier table and commitment value are public in the transaction context.
+- `compute_investor_payout()`, `claim_investor_payout()`, and other investor-facing entrypoints branch on public snapshot values and stored contribution records. There is no hidden secret being protected by these branches.
+- `fund_impl()` performs public input validation (`amount`, caps, allowlist membership) and recording. Any timing differences are on data that is already observable or attacker-controlled.
+- `withdraw()` and `sweep_terminal_dust()` perform SEP-41 balance-delta checks. These operations are not constant-time, but their security goal is to detect non-standard token behavior, not to protect confidential data.
+
+### 7.3 Constant-time assessment
+
+- No constant-time alternatives are required for the current escrow implementation because there is no secret-dependent branching or private state within this contract.
+- The current design already fails safely on non-standard token behavior through strict pre/post balance invariants in `external_calls::transfer_funding_token_with_balance_checks`.
+- If future features introduce confidential or privacy-sensitive inputs, add a focused side-channel review at that time.
+
+### 7.4 Risk statement
+
+- Current side-channel risk is low: contract state and transaction inputs are public and visible to ledger observers.
+- The main remaining security risk class is unsupported token economics and governance allowlist failure, not execution-timing leaks.
+- This conclusion is intentional: the contract does not need a constant-time rewrite for the current threat model.
 
 ---
 

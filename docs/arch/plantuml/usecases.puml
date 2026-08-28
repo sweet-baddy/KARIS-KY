@@ -1,0 +1,40 @@
+@startuml
+title Contract Use Cases by Role
+
+left to right direction
+
+actor Admin
+actor SME
+actor Investor
+actor Treasury
+
+(initialize escrow) as init
+(set legal hold) as hold
+(propose admin) as propose
+(bind attestation) as attest
+
+(fund escrow) as fund
+(fund with commitment) as fund_commit
+(claim payout) as claim
+  (withdraw) as withdraw
+(settle escrow) as settle
+
+(sweep dust) as sweep
+(record collateral) as collateral
+
+Admin --> init
+Admin --> hold
+Admin --> propose
+Admin --> attest
+
+Investor --> fund
+Investor --> fund_commit
+Investor --> claim
+
+SME --> withdraw
+SME --> settle
+SME --> collateral
+
+Treasury --> sweep
+
+@enduml

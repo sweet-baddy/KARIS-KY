@@ -14,6 +14,11 @@ tokenized invoices until settlement and is maintained under the `karis-ky` proje
 
 For local development and CI, Rust alone is sufficient.
 
+### SDK Examples
+
+Common integration patterns are demonstrated in [`examples/basic_workflow.rs`](examples/basic_workflow.rs):
+init, fund, settle, claim, tiered yield, oracle settlement, and NFT minting workflows.
+
 ---
 
 ## Quick start
@@ -22,6 +27,27 @@ For local development and CI, Rust alone is sufficient.
 cargo build
 cargo test
 ```
+
+### Local development (one-command)
+
+```bash
+source scripts/local-env.sh
+```
+
+This sets up a complete local Soroban environment — validator, identities,
+test token, and deployed contract — ready for development. See
+[scripts/local-env.sh](scripts/local-env.sh) for details.
+
+### TypeScript SDK
+
+```bash
+cd sdk-ts
+npm install
+npm run build
+npm run example
+```
+
+See [`sdk-ts/`](sdk-ts/) for the typed client wrapper, contract types, and example usage.
 
 ---
 
@@ -39,10 +65,10 @@ WASM.
 | 3 | Added `FundingCloseSnapshot`, `MinContributionFloor`, `MaxUniqueInvestorsCap`, `UniqueFunderCount` | Additive keys — old instances return `None` / `0` defaults |
 | 4 | Added attestation API (`PrimaryAttestationHash`, `AttestationAppendLog`) | Additive keys — no `migrate` call required |
 | 5 | Added `YieldTierTable` (`fund_with_commitment`), `RegistryRef`, `Treasury`; tightened `InvoiceEscrow` layout | **Redeploy required** if `InvoiceEscrow` struct layout differs from stored XDR |
-
 | 6 | Moved per-investor keys to persistent storage to bound instance footprint and decouple per-address TTL | **Redeploy required** — prior instances must be redeployed to pick up new storage locations |
+| 7 | Added `DisputePaused` state for temporary dispute resolution (separate from legal hold) | Additive keys — no `migrate` call required |
 
-> **Current:** `SCHEMA_VERSION = 6`
+> **Current:** `SCHEMA_VERSION = 7`
 
 ---
 
@@ -150,20 +176,27 @@ cargo clippy --all-targets -- -D warnings
 
 | Entrypoint | Description |
 |------------|-------------|
-| `init` | Create an invoice escrow; binds funding token, treasury, optional registry. |
-| `fund` | Record investor principal; marks escrow funded when target is met. |
-| `fund_with_commitment` | First deposit with optional lock period; selects tiered yield. |
+| `init` | Create an invoice escrow; binds funding token, treasury, optional registry. See [parameter reference](docs/escrow-init-parameters.md). |
+| `fund` | Record investor principal; marks escrow funded when target is met. See [fund parameters reference](docs/escrow-fund-parameters.md). |
+| `fund_with_commitment` | First deposit with optional lock period; selects tiered yield. See [fund parameters reference](docs/escrow-fund-parameters.md). |
 | `settle` | Mark a funded escrow as settled (SME auth required; maturity enforced). |
+| `clone_settled_escrow` | Clone a settled escrow template to create a new independent escrow with the same parameters (admin auth required). |
 | `withdraw` | SME pulls funded liquidity (accounting record). |
 | `claim_investor_payout` | Investor records a payout claim after settlement. |
 | `sweep_terminal_dust` | Treasury sweeps rounding residue from a terminal escrow. |
 | `migrate` | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin activates/clears compliance hold. |
+| `pause_dispute` | Admin temporarily freezes escrow due to dispute (separate from legal hold). |
+| `resume_dispute` | Admin manually resumes a paused escrow (or wait for auto-expiration). |
+| `is_dispute_paused` | Check if dispute pause is currently active. |
+| `get_dispute_pause` | Retrieve active dispute pause state (ticket, timestamps). |
 | `bind_primary_attestation_hash` | Admin sets a single-write 32-byte digest. |
 | `append_attestation_digest` | Admin appends to bounded audit log. |
 | `record_sme_collateral_commitment` | SME records collateral pledge (metadata only). |
 | `get_escrow` | Read current escrow state. |
 | `get_version` | Read stored `DataKey::Version`. |
+| `export_state` | Admin serializes all enumerable instance-storage state into an `EscrowStateExport` (disaster recovery / migration). |
+| `import_state` | Admin restores instance-storage state from an `EscrowStateExport` onto a fresh, uninitialized instance. |
 
 ---
 
@@ -191,7 +224,7 @@ Escrow tests are organized by feature area under
 | `init.rs` | Initialization, invoice-id validation, getters, init-shaped baselines |
 | `funding.rs` | Funding, contribution accounting, snapshots, tier selection |
 | `settlement.rs` | Settlement, withdrawal, investor claims, maturity boundaries, dust sweep |
-| `admin.rs` | Admin-governed state changes, legal hold, migration guards, collateral metadata |
+| `admin.rs` | Admin-governed state changes, legal hold, dispute pause, migration guards, collateral metadata |
 | `integration.rs` | External token-wrapper assumptions, metadata-only integration checks |
 | `properties.rs` | Proptest-based invariants |
 
@@ -239,6 +272,9 @@ See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the ris
 - **Legal hold:** governance-controlled; misuse risk is mitigated by using a
   multisig `admin` and operational policy (see
   [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md)).
+- **Dispute pause:** admin-triggered temporary freeze (separate from legal hold) for
+  resolving invoice disputes. Auto-expires after configured duration. See
+  [`docs/DEPLOYER_SECURITY.md`](docs/DEPLOYER_SECURITY.md) for operational guidance.
 - **Collateral record:** SME-reported metadata only; not proof of custody,
   token movement, reserved balance, or an enforceable on-chain claim.
 - **Token integration:** fee-on-transfer, rebasing, and hook tokens are
@@ -292,6 +328,23 @@ cargo llvm-cov --features testutils --fail-under-lines 95 --summary-only -p kari
 - After any lockfile update, re-run the full CI command set above before merge.
 - Dependency policy, cadence, and emergency workflow are documented in
   [`docs/escrow-dependency-policy.md`](docs/escrow-dependency-policy.md).
+
+---
+
+## Developer Resources
+
+| Resource | Description |
+|----------|-------------|
+| [State Machine Diagram](docs/state-machine.md) | Mermaid UML diagram of all states (0–5), valid transitions, blocked operations per state, and legal hold / dispute pause overlays |
+| [Token Integration Guide](docs/token-integration-guide.md) | USDC/USDT/EURC stablecoin examples, fee-on-transfer warning, rebasing pitfalls, and pre-integration test script |
+| [Init Parameter Reference](docs/escrow-init-parameters.md) | Every init parameter, valid ranges, conservative vs. aggressive examples, gas costs |
+| [Local Environment Script](scripts/local-env.sh) | One-command local Soroban dev environment setup |
+| [Deployer Script](scripts/deploy.sh) | Config-driven contract deployment with .env support |
+| [TypeScript SDK](sdk-ts/) | Typed client wrapper, contract types, error codes, examples |
+| [Contract Spec](sdk-ts/spec.json) | Machine-readable ABI spec for SDK consumption |
+| [CLI Simulation Recipes](docs/escrow-sim-stellar-cli.md) | All entrypoint invocations via Stellar CLI |
+| [Demo Series](docs/demos/README.md) | Step-by-step lifecycle walkthrough |
+| [Error Code Reference](docs/escrow-error-messages.md) | Stable typed error codes and recovery actions |
 
 ---
 

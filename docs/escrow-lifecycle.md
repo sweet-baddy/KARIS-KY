@@ -14,6 +14,7 @@ forbidden regressions, and interaction rules between `withdraw` vs `settle` path
 | `2` | `settled` | SME has finalized settlement after legal/financial review |
 | `3` | `withdrawn` | SME has withdrawn liquidity (pull model, off-chain settlement) |
 | `4` | `cancelled` | Admin cancelled the escrow before it was funded; investors may reclaim principal via `refund()` |
+| `5` | `archived` | Admin has archived the escrow; read-only terminal state for closed records |
 
 ---
 
@@ -39,10 +40,18 @@ forbidden regressions, and interaction rules between `withdraw` vs `settle` path
   │      │      │      │  if target not met)  │ → returns InvestorContribution
   ▼      ▼      │      │                      ▼
 ┌────┐ ┌────┐   │      │               (principal returned)
-│ 2  │ │ 3  │   └──────┘
-│set │ │wd  │
-└────┘ └────┘
-(terminal)  (terminal)
+│ 2  │ │ 3  │   └──────┘                     │
+│set │ │wd  │                                 │
+└──┬─┘ └──┬─┘                                 │
+   │      │                                   │
+   │      └──────────┬────────────────────────┘
+   │                 │
+   ▼                 ▼
+┌─────────────────────────────┐
+│  archive_escrow() [admin]   │
+│        status = 5           │
+│        archived             │
+└─────────────────────────────┘
 ```
 
 ---
@@ -91,6 +100,9 @@ let result = fund_batch(entries); // All three funded in one call
 | `0` (open) | `4` (cancelled) | `cancel_funding()` | Admin auth; legal hold must be inactive |
 | `1` (funded) | `2` (settled) | `settle()` | SME auth; legal hold must be inactive; if `maturity > 0`, ledger timestamp must be >= maturity |
 | `1` (funded) | `3` (withdrawn) | `withdraw()` | SME auth; legal hold must be inactive |
+| `2` (settled) | `5` (archived) | `archive_escrow()` | Admin auth |
+| `3` (withdrawn) | `5` (archived) | `archive_escrow()` | Admin auth |
+| `4` (cancelled) | `5` (archived) | `archive_escrow()` | Admin auth |
 
 ---
 
@@ -106,6 +118,7 @@ let result = fund_batch(entries); // All three funded in one call
 | `2` (settled) | any | Status never regresses from terminal |
 | `3` (withdrawn) | any | Status never regresses from terminal |
 | `4` (cancelled) | any | Status never regresses from terminal |
+| `5` (archived) | any | Status never regresses from archived |
 
 ---
 
@@ -203,9 +216,10 @@ When `maturity > 0`:
 | `2` (settled) | Yes | Yes |
 | `3` (withdrawn) | Yes | Yes |
 | `4` (cancelled) | Yes | Yes |
+| `5` (archived) | Yes | Yes |
 
 This allows the treasury to recover any rounding residue left after all investors
-have been refunded.
+have been refunded or the escrow has been archived.
 
 ---
 

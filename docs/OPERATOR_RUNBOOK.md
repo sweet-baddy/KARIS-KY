@@ -173,6 +173,29 @@ a bookkeeping step after additive upgrades.
 
 Complete all items before promoting to Mainnet.
 
+### Read-only RPC pre-flight
+
+Use `scripts/pre-flight-checklist.sh` for the read-only contract checks. The
+independent checks run concurrently and their results are printed in a stable
+order after every started request has completed. A failed, timed-out, malformed,
+or non-successful RPC response makes the script exit non-zero.
+
+Prerequisites: Bash, `stellar`, `curl` as required by the installed CLI,
+`jq` for downstream inspection, and the GNU `timeout` utility. Configure the
+Stellar CLI network first, then run:
+
+```bash
+export STELLAR_NETWORK=testnet
+export CONTRACT_ID=C...
+bash scripts/pre-flight-checklist.sh
+```
+
+The default network is `local`. Set `CHECK_TIMEOUT_SECS` to override the
+30-second timeout per query. The script uses the configured named network and
+does not print or accept signing secrets; these checks are read-only. Keep
+dependent checks outside the parallel batch if future checks require output
+from an earlier query.
+
 ### Build & verify
 
 ```bash

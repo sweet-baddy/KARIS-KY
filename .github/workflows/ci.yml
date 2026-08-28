@@ -29,6 +29,12 @@ jobs:
       - name: Build
         run: cargo build
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo-audit (dependency vulnerability scan)
+        run: cargo audit --deny warnings
+
       - name: Run tests
         run: cargo test
 
@@ -37,8 +43,139 @@ jobs:
 
       - name: Add WASM target
         run: rustup target add wasm32-unknown-unknown
+
       - name: Build WASM
-        run: cargo build --target wasm32-unknown-unknown --release -p karis-ky_escrow
+        run: cargo build --target wasm32-unknown-unknown --release -p karis_ky_escrow
+        env:
+          # Make missing git metadata a hard build error in CI/release builds
+          # so the WASM artifact always carries a real commit hash. Local dev
+          # builds can unset this to allow tarball/shallow-checkout workflows.
+          REQUIRE_GIT_METADATA: "1"
+
+      # -----------------------------------------------------------------------
+      # Build metadata validation
+      # -----------------------------------------------------------------------
+      #
+      # Verifies that the metadata embedded into the WASM artifact by
+      # `escrow/build.rs` (git commit, build timestamp, package version,
+      # and the source-of-truth schema/interface versions) matches the
+      # values declared in `escrow/src/lib.rs`. Fails the build on drift.
+
+      - name: Validate embedded build metadata
+        run: |
+          python3 scripts/validate_build_metadata.py \
+            --json target/build_metadata.json \
+            --lib escrow/src/lib.rs
+
+      # -----------------------------------------------------------------------
+      # WASM size tracking
+      # -----------------------------------------------------------------------
+
+      - name: Check WASM size
+        # Fails the build if the artifact exceeds 1 MB or grew >10% vs baseline.
+        # On pushes to main, --record updates the baseline JSON and it is
+        # committed back via the "Update WASM size baseline" step below.
+        run: |
+          python3 scripts/check_wasm_size.py \
+            --wasm target/wasm32-unknown-unknown/release/karis_ky_escrow.wasm \
+            --baseline scripts/wasm_size_baseline.json \
+            ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--record' || '' }}
+
+      - name: Generate WASM size trend report
+        # Always runs (even on failure) so we get a report in the job summary.
+        if: always()
+        run: |
+          python3 scripts/wasm_size_report.py \
+            --baseline scripts/wasm_size_baseline.json \
+            --format markdown \
+            --out /tmp/wasm_size_report.md
+          # Append to the GitHub Actions job summary
+          cat /tmp/wasm_size_report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload WASM size report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-size-report
+          path: /tmp/wasm_size_report.md
+          retention-days: 90
+
+      - name: Upload WASM artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: karis-ky-escrow-wasm
+          path: target/wasm32-unknown-unknown/release/karis_ky_escrow.wasm
+          retention-days: 90
+
+      - name: Commit updated WASM size baseline
+        # Only runs on main push after a clean size check, so baseline stays
+        # in sync with production builds.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git diff --quiet scripts/wasm_size_baseline.json || (
+            git add scripts/wasm_size_baseline.json &&
+            git commit -m "chore: update WASM size baseline [skip ci]" &&
+            git push
+          )
+
+      # -----------------------------------------------------------------------
+      # Contract spec (ABI) extraction and publishing
+      # -----------------------------------------------------------------------
+
+      - name: Validate contract spec
+        # Ensures spec.json is valid JSON and matches the deployed contract version.
+        run: |
+          python3 -c "
+          import json
+          with open('sdk-ts/spec.json') as f:
+              spec = json.load(f)
+          sv = spec['contract']['schema_version']
+          iv = spec['contract']['interface_version']
+          print(f'Spec schema_version={sv}, interface_version={iv}')
+          assert sv == ${SCHEMA_VERSION:-6}, f'spec schema_version {sv} != expected ${SCHEMA_VERSION:-6}'
+          assert iv == ${INTERFACE_VERSION:-1}, f'spec interface_version {iv} != expected ${INTERFACE_VERSION:-1}'
+          print('Spec validation OK')
+          "
+        env:
+          SCHEMA_VERSION: "6"
+          INTERFACE_VERSION: "1"
+
+      - name: Upload contract spec artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: karis-ky-escrow-spec
+          path: sdk-ts/spec.json
+          retention-days: 90
+
+      - name: Publish spec to GitHub Release
+        # On main pushes, attach the spec to a versioned GitHub release.
+        # Creates or updates a 'spec' tag release with the latest spec.json.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          SPEC_VERSION="v$(date +%Y.%m.%d)-$(git rev-parse --short HEAD)"
+          echo "SPEC_VERSION=${SPEC_VERSION}" >> $GITHUB_ENV
+
+          # Create a lightweight tag for the spec version
+          git tag -f "spec-latest"
+          git push -f origin "spec-latest"
+
+          # Upload spec as a release asset
+          gh release create "spec-latest" \
+            sdk-ts/spec.json \
+            --title "Contract Spec (latest)" \
+            --notes "Auto-published contract ABI spec from main @ ${SPEC_VERSION}. Schema v${SCHEMA_VERSION:-6}, Interface v${INTERFACE_VERSION:-1}." \
+            --prerelease \
+            || gh release upload "spec-latest" sdk-ts/spec.json --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCHEMA_VERSION: "6"
+          INTERFACE_VERSION: "1"
+
+      # -----------------------------------------------------------------------
 
       - name: Workspace Clippy (all targets)
         run: cargo clippy -p karis-ky_escrow --all-targets -- -D warnings

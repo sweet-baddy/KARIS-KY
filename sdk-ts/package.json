@@ -1,0 +1,48 @@
+{
+  "name": "@karis-ky/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the karis-ky escrow smart contract on Stellar Soroban",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "spec.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "example": "ts-node examples/basic-usage.ts",
+    "lint": "eslint src/ examples/",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "ts-node": "^10.9.0",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@types/jest": "^29.5.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/karis-ky/karis-ky"
+  },
+  "keywords": [
+    "stellar",
+    "soroban",
+    "escrow",
+    "invoice",
+    "smart-contract",
+    "karis-ky"
+  ]
+}
