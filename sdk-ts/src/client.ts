@@ -363,12 +363,20 @@ export class EscrowClient {
     return this.invoke("init", args, source);
   }
 
-  /** Fund escrow. Auth: investor. */
+  /**
+   * Fund escrow with base yield.
+   * Auth: investor.
+   * See [Fund Parameters Reference](../../../docs/escrow-fund-parameters.md#fund--simple-base-yield-deposit).
+   */
   async fund(investor: string, amount: string, source?: string): Promise<InvoiceEscrow> {
     return this.invoke("fund", [investor, amount], source);
   }
 
-  /** First deposit with tiered yield commitment. Auth: investor. */
+  /**
+   * First deposit with tiered yield commitment (single deposit per investor).
+   * Auth: investor.
+   * See [Fund Parameters Reference](../../../docs/escrow-fund-parameters.md#fund_with_commitment--first-deposit-tiered-yield).
+   */
   async fundWithCommitment(
     investor: string,
     amount: string,
