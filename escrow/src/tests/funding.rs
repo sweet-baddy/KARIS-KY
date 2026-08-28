@@ -314,6 +314,70 @@ fn test_fund_with_commitment_overflow_does_not_mutate_state() {
     assert_eq!(client.get_contribution(&investor_b), 0);
 }
 
+#[test]
+fn test_fund_overflow_emits_typed_error() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF_TYPED"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund to near-maximum
+    client.fund(&investor_a, &(i128::MAX - 1));
+    
+    // Attempt to add amount that would overflow
+    let result = client.try_fund(&investor_b, &2i128);
+    assert_contract_error(result, EscrowError::FundedAmountOverflow);
+}
+
+#[test]
+fn test_fund_with_commitment_overflow_emits_typed_error() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF_COM_TYPED"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund to near-maximum
+    client.fund(&investor_a, &(i128::MAX - 1));
+    
+    // Attempt to add amount that would overflow via commitment variant
+    let result = client.try_fund_with_commitment(&investor_b, &2i128, &0u64);
+    assert_contract_error(result, EscrowError::FundedAmountOverflow);
+}
+
 /// Regression for issue #253: per-investor accounting must live in persistent storage, not instance.
 #[test]
 fn test_per_investor_contribution_uses_persistent_storage() {
