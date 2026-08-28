@@ -513,6 +513,15 @@ pub enum EscrowError {
     ReinvestYieldInsufficient = 184,
     /// [`LiquifactEscrow::withdraw`] called by a caller that is not the registered SME address.
     UnauthorizedWithdrawer = 185,
+
+    /// [`LiquifactEscrow::export_state`] called before escrow has been initialized.
+    ExportNotInitialized = 200,
+    /// [`LiquifactEscrow::import_state`] called on an already-initialized contract.
+    ImportAlreadyInitialized = 201,
+    /// [`LiquifactEscrow::import_state`] received a schema version that does not match [`SCHEMA_VERSION`].
+    ImportSchemaMismatch = 202,
+    /// [`LiquifactEscrow::import_state`] detected a checksum mismatch (state was tampered with).
+    ImportChecksumMismatch = 203,
 }
 
 #[inline(always)]
@@ -739,6 +748,60 @@ pub struct BuildMetadata {
     pub build_timestamp: String,
     pub pkg_version: String,
     pub rust_version: String,
+}
+
+/// Enumerable contract state export for disaster recovery and network migration.
+/// Returned by [`LiquifactEscrow::export_state`]; may be imported onto a fresh instance via [`LiquifactEscrow::import_state`].
+///
+/// This struct captures all **instance-storage** state but **not** per-investor persistent storage
+/// (e.g., `DataKey::InvestorContribution(address)`). See [`LiquifactEscrow::export_state`] for details.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EscrowStateExport {
+    /// The escrow contract state at export time.
+    pub escrow: InvoiceEscrow,
+    /// Schema version at export time; must match target's `SCHEMA_VERSION`.
+    pub schema_version: u32,
+    /// The SEP-41 funding token address.
+    pub funding_token: Address,
+    /// The protocol treasury address.
+    pub treasury: Address,
+    /// Optional registry contract hint (for discoverability only, not authority).
+    pub registry: Option<Address>,
+    /// Optional tiered yield table, immutable after init.
+    pub yield_tiers: Option<Vec<YieldTier>>,
+    /// Funding-close snapshot captured once status became funded (1).
+    pub funding_close_snapshot: Option<FundingCloseSnapshot>,
+    /// Minimum contribution floor per fund call.
+    pub min_contribution_floor: i128,
+    /// Optional cap on distinct investor addresses.
+    pub max_unique_investors_cap: Option<u32>,
+    /// Optional per-investor contribution cap.
+    pub max_per_investor_cap: Option<i128>,
+    /// Count of distinct investor addresses.
+    pub unique_funder_count: u32,
+    /// Legal hold active flag.
+    pub legal_hold: bool,
+    /// Configured delay before legal hold may be cleared.
+    pub legal_hold_clear_delay: u64,
+    /// Timestamp when legal hold may be cleared (if a clear request is pending).
+    pub legal_hold_clearable_at: Option<u64>,
+    /// Whether the investor allowlist is active.
+    pub allowlist_active: bool,
+    /// Admin-set primary attestation digest.
+    pub primary_attestation_hash: Option<BytesN<32>>,
+    /// Append-only audit log of attestation digests.
+    pub attestation_log: Vec<BytesN<32>>,
+    /// Optional SME collateral commitment metadata.
+    pub collateral: Option<SmeCollateralCommitment>,
+    /// Amount distributed to investors via payouts/refunds.
+    pub distributed_principal: i128,
+    /// Optional funding deadline timestamp.
+    pub funding_deadline: Option<u64>,
+    /// Optional pending admin awaiting acceptance.
+    pub pending_admin: Option<Address>,
+    /// SHA-256 checksum over critical fields to detect tampering.
+    pub checksum: BytesN<32>,
 }
 
 /// Read-only dashboard metrics for this escrow, returned by
