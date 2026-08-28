@@ -527,9 +527,14 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &None,
     );
 
-    let commitment = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
+    let commitment = client.record_sme_collateral_commitment(
+        &symbol_short!("USDC"),
+        &5_000i128,
+        &soroban_sdk::String::from_str(&env, "equipment"),
+    );
     assert_eq!(commitment.asset, symbol_short!("USDC"));
     assert_eq!(commitment.amount, 5_000i128);
+    assert_eq!(commitment.collateral_type, soroban_sdk::String::from_str(&env, "equipment"));
     assert!(client.get_sme_collateral_commitment().is_some());
 }
 
@@ -559,7 +564,11 @@ fn test_collateral_record_event_payload_is_metadata_only() {
         );
     });
 
-    client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
+    client.record_sme_collateral_commitment(
+        &symbol_short!("USDC"),
+        &5_000i128,
+        &soroban_sdk::String::from_str(&env, "equipment"),
+    );
 
     assert_eq!(
         env.events().all().filter_by_contract(&contract_id),
@@ -613,7 +622,11 @@ fn test_collateral_replacement_event_contains_prior_amount() {
     });
 
     // First record: check event has prior_amount = 0
-    client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
+    client.record_sme_collateral_commitment(
+        &symbol_short!("USDC"),
+        &5_000i128,
+        &soroban_sdk::String::from_str(&env, "equipment"),
+    );
     let events_first = env.events().all().filter_by_contract(&contract_id);
     assert_eq!(
         events_first.events().len(),
@@ -634,7 +647,11 @@ fn test_collateral_replacement_event_contains_prior_amount() {
 
     // Advance timestamp and record replacement
     env.ledger().with_mut(|li| li.timestamp = 20000);
-    client.record_sme_collateral_commitment(&symbol_short!("USDC"), &7_000i128);
+    client.record_sme_collateral_commitment(
+        &symbol_short!("USDC"),
+        &7_000i128,
+        &soroban_sdk::String::from_str(&env, "equipment"),
+    );
 
     // Check second event has prior_amount = 5000 (replacement)
     let events_second = env.events().all().filter_by_contract(&contract_id);

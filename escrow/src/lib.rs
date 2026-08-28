@@ -288,6 +288,8 @@ pub enum EscrowError {
     CollateralAssetEmpty = 61,
     /// [`LiquifactEscrow::record_sme_collateral_commitment`] received a timestamp before the stored record.
     CollateralTimestampBackwards = 62,
+    /// [`LiquifactEscrow::record_sme_collateral_commitment`] received an empty collateral_type string.
+    CollateralTypeEmpty = 63,
 
     /// [`LiquifactEscrow::set_investors_allowlisted`] received an empty batch.
     InvestorBatchEmpty = 70,
@@ -589,6 +591,7 @@ pub struct InvoiceEscrow {
 /// - `asset`: The off-chain asset symbol (cannot be empty).
 /// - `amount`: The reported collateral amount (must be positive).
 /// - `recorded_at`: The Soroban ledger timestamp when this record was written.
+/// - `collateral_type`: A descriptive categorization of the collateral pledge (must be non-empty).
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 /// SME collateral commitment metadata (record-only).
@@ -601,6 +604,7 @@ pub struct SmeCollateralCommitment {
     pub asset: Symbol,
     pub amount: i128,
     pub recorded_at: u64,
+    pub collateral_type: String,
 }
 
 /// One step in an optional tier ladder: investors who commit to at least `min_lock_secs` (on first
@@ -2082,24 +2086,32 @@ impl LiquifactEscrow {
     /// # Validation Rules
     /// - **Positive Amount:** The `amount` parameter must be strictly positive (`amount > 0`).
     /// - **Non-empty Asset Symbol:** The `asset` parameter must be a non-empty Symbol (not equal to `Symbol::new(&env, "")`).
+    /// - **Non-empty Collateral Type:** The `collateral_type` parameter must not be an empty string.
     /// - **Monotonic Timestamp:** When replacing an existing commitment, the current ledger timestamp must not
     ///   be earlier than the prior `recorded_at` value (`now >= prior.recorded_at`).
     ///
     /// # Errors
     /// - [`EscrowError::CollateralAmountNotPositive`] if `amount <= 0`.
     /// - [`EscrowError::CollateralAssetEmpty`] if `asset` is empty.
+    /// - [`EscrowError::CollateralTypeEmpty`] if `collateral_type` is empty.
     /// - [`EscrowError::CollateralTimestampBackwards`] if the replacement timestamp is in the past.
     /// - Standard uninitialized check via `load_escrow_require_sme`.
     pub fn record_sme_collateral_commitment(
         env: Env,
         asset: Symbol,
         amount: i128,
+        collateral_type: String,
     ) -> SmeCollateralCommitment {
         ensure(&env, amount > 0, EscrowError::CollateralAmountNotPositive);
         ensure(
             &env,
             asset != Symbol::new(&env, ""),
             EscrowError::CollateralAssetEmpty,
+        );
+        ensure(
+            &env,
+            collateral_type.len() > 0,
+            EscrowError::CollateralTypeEmpty,
         );
 
         // env.clone(): env is used again after this call for storage read/write, timestamp, and publish.
@@ -2122,6 +2134,7 @@ impl LiquifactEscrow {
             asset,
             amount,
             recorded_at: now,
+            collateral_type,
         };
         env.storage()
             .instance()

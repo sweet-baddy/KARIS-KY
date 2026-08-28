@@ -1,6 +1,6 @@
 # SME Collateral Commitment Metadata
 
-`record_sme_collateral_commitment(asset, amount)` in [`escrow/src/lib.rs`](../escrow/src/lib.rs) is a metadata-only Soroban escrow entrypoint. It allows the configured SME address to report collateral metadata for off-chain review, but it does **not** move, reserve, escrow, freeze, or verify any asset on-chain.
+`record_sme_collateral_commitment(asset, amount, collateral_type)` in [`escrow/src/lib.rs`](../escrow/src/lib.rs) is a metadata-only Soroban escrow entrypoint. It allows the configured SME address to report collateral metadata for off-chain review, but it does **not** move, reserve, escrow, freeze, or verify any asset on-chain.
 
 ## Limitations & Contrast with Custody Flows
 
@@ -24,6 +24,7 @@ Only the configured SME address (`InvoiceEscrow::sme_address`) is authorized to 
 The contract validates inputs and state before recording:
 - **Positive Amount:** The `amount` parameter must be strictly positive (`amount > 0`). If it is zero or negative, the contract panics with [`EscrowError::CollateralAmountNotPositive`].
 - **Non-empty Asset Symbol:** The `asset` parameter must be a non-empty Symbol (`asset != Symbol::new(&env, "")`). If an empty symbol is passed, the contract panics with [`EscrowError::CollateralAssetEmpty`].
+- **Non-empty Collateral Type:** The `collateral_type` parameter must be a non-empty string. If an empty string is passed, the contract panics with [`EscrowError::CollateralTypeEmpty`].
 - **Monotonic Timestamp on Replacement:** When replacing an existing commitment, the current ledger timestamp from `Env::ledger().timestamp()` must not be earlier than the previously recorded timestamp (`now >= prior_commitment.recorded_at`). This acts as a defense-in-depth against stale out-of-order writes. If the timestamp goes backwards, the contract panics with [`EscrowError::CollateralTimestampBackwards`].
 
 ### 3. Storage
@@ -33,6 +34,7 @@ The recorded data is represented by the [`SmeCollateralCommitment`] struct:
 - `asset`: `Symbol` – the off-chain asset symbol.
 - `amount`: `i128` – the reported amount.
 - `recorded_at`: `u64` – the Soroban ledger timestamp when the commitment was written.
+- `collateral_type`: `String` – a descriptive categorization of the collateral pledge (non-empty).
 
 To retrieve the current record, external callers can use [`LiquifactEscrow::get_sme_collateral_commitment`].
 
