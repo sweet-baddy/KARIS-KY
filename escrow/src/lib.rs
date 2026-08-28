@@ -5621,6 +5621,43 @@ impl LiquifactEscrow {
                     .instance()
                     .set(&DataKey::FundingCloseSnapshot, &snap);
 
+                // Validate that snapshot timestamp is before maturity.
+                // If funding closed after maturity, emit a warning event for audit trail.
+                if escrow.maturity > 0 && snap.closed_at_ledger_timestamp >= escrow.maturity {
+                    // Snapshot recorded after or at maturity; emit warning type 4004.
+                    let funded_ratio_bps: i64 = if escrow.funding_target > 0 {
+                        let numerator = (escrow.funded_amount as i128).saturating_mul(10_000);
+                        let ratio = numerator / (escrow.funding_target as i128);
+                        if ratio > i64::MAX as i128 {
+                            i64::MAX
+                        } else if ratio < 0 {
+                            0
+                        } else {
+                            ratio as i64
+                        }
+                    } else {
+                        10_000_i64
+                    };
+
+                    let time_to_maturity_secs: i64 = {
+                        let maturity_i64 = escrow.maturity as i64;
+                        let now_i64 = snap.closed_at_ledger_timestamp as i64;
+                        maturity_i64.saturating_sub(now_i64)
+                    };
+
+                    EscrowHealthWarning {
+                        name: symbol_short!("hlth_wrn"),
+                        invoice_id: escrow.invoice_id.clone(),
+                        warning_type: 4004, // FundingClosedAfterMaturity
+                        funded_amount: escrow.funded_amount,
+                        funding_target: escrow.funding_target,
+                        funded_ratio_bps,
+                        time_to_maturity_secs,
+                        recorded_at_ledger_timestamp: snap.closed_at_ledger_timestamp,
+                    }
+                    .publish(&env);
+                }
+
                 // Compute and store Merkle root for proof-based claim verification.
                 // The root is a Keccak-256 hash of the empty set when there are no
                 // investor entries to include (unlikely at funded status, but safe).
@@ -5772,6 +5809,43 @@ impl LiquifactEscrow {
             env.storage()
                 .instance()
                 .set(&DataKey::FundingCloseSnapshot, &snap);
+
+            // Validate that snapshot timestamp is before maturity.
+            // If funding closed after maturity, emit a warning event for audit trail.
+            if escrow.maturity > 0 && snap.closed_at_ledger_timestamp >= escrow.maturity {
+                // Snapshot recorded after or at maturity; emit warning type 4004.
+                let funded_ratio_bps: i64 = if escrow.funding_target > 0 {
+                    let numerator = (escrow.funded_amount as i128).saturating_mul(10_000);
+                    let ratio = numerator / (escrow.funding_target as i128);
+                    if ratio > i64::MAX as i128 {
+                        i64::MAX
+                    } else if ratio < 0 {
+                        0
+                    } else {
+                        ratio as i64
+                    }
+                } else {
+                    10_000_i64
+                };
+
+                let time_to_maturity_secs: i64 = {
+                    let maturity_i64 = escrow.maturity as i64;
+                    let now_i64 = snap.closed_at_ledger_timestamp as i64;
+                    maturity_i64.saturating_sub(now_i64)
+                };
+
+                EscrowHealthWarning {
+                    name: symbol_short!("hlth_wrn"),
+                    invoice_id: escrow.invoice_id.clone(),
+                    warning_type: 4004, // FundingClosedAfterMaturity
+                    funded_amount: escrow.funded_amount,
+                    funding_target: escrow.funding_target,
+                    funded_ratio_bps,
+                    time_to_maturity_secs,
+                    recorded_at_ledger_timestamp: snap.closed_at_ledger_timestamp,
+                }
+                .publish(&env);
+            }
 
             // Compute and store Merkle root for the partial-settle path.
             let merkle_root = Self::compute_empty_merkle_root(&env);
