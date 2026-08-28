@@ -1138,6 +1138,30 @@ pub struct FundReceived {
     pub tier_lock_secs: u64,
 }
 
+/// Emitted once by [`LiquifactEscrow::batch_fund`] after all entries are successfully processed.
+///
+/// Provides a roll-up view of the entire batch: total principal credited and the number of
+/// distinct investor entries processed. Indexers and dashboards can use this event to
+/// reconcile batch submissions without scanning every individual [`EscrowFunded`] event.
+///
+/// Per-entry [`EscrowFunded`] and [`FundReceived`] events are still emitted by the underlying
+/// [`fund_impl`] for full per-investor audit coverage.
+#[contractevent]
+pub struct BatchFundCompleted {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Total principal credited across all entries in this batch (sum of all amounts).
+    pub total_funded_amount: i128,
+    /// Number of investor entries processed in this batch call.
+    pub investor_count: u32,
+    /// Final `funded_amount` stored in the escrow after the batch completes.
+    pub escrow_funded_amount: i128,
+    /// Final escrow status after the batch completes (`0` = open, `1` = funded).
+    pub status: u32,
+}
+
 /// Emitted by [`LiquifactEscrow::archive_escrow`] when a terminal escrow (settled, withdrawn,
 /// or cancelled) transitions to the read-only archived status (`5`).
 #[contractevent]
@@ -5190,6 +5214,79 @@ impl LiquifactEscrow {
             // so we capture it for the next iteration.
             escrow = Self::fund_impl(env.clone(), investor, amount, true, 0);
         }
+
+        escrow
+    }
+
+    /// Batch funding entrypoint: record multiple investor principals in a single atomic call
+    /// and emit a [`BatchFundCompleted`] summary event when all entries succeed.
+    ///
+    /// This is the canonical FEAT-001 entrypoint. It differs from [`LiquifactEscrow::fund_batch`]
+    /// in one key way: after every entry is processed it emits a single `BatchFundCompleted` event
+    /// carrying the aggregate totals (`total_funded_amount` and `investor_count`), which lets
+    /// indexers reconcile a batch submission with a single event lookup rather than scanning all
+    /// individual per-entry [`EscrowFunded`] events.
+    ///
+    /// Each entry is processed sequentially with per-investor [`Address::require_auth()`].
+    /// All existing [`LiquifactEscrow::fund`] invariants (allowlist, caps, min contribution,
+    /// overflow guards) are enforced per entry. If any single entry fails its invariants the
+    /// entire transaction reverts atomically — no partial state is persisted.
+    ///
+    /// # Parameters
+    /// - `contributions`: `Vec<(Address, i128)>` of `(investor_address, amount)` tuples.
+    ///   Maximum [`MAX_FUND_BATCH`] (50) entries per call.
+    ///
+    /// # Returns
+    /// The updated [`InvoiceEscrow`] after all entries are applied.
+    ///
+    /// # Events
+    /// - Per entry: [`EscrowFunded`] + [`FundReceived`] (identical to single
+    ///   [`LiquifactEscrow::fund`] semantics, emitted inside [`fund_impl`]).
+    /// - Once, at end: [`BatchFundCompleted`] with aggregate totals.
+    ///
+    /// # Funded-target snapshot
+    /// If any entry causes the escrow to transition to **funded** (`status 0 → 1`),
+    /// [`DataKey::FundingCloseSnapshot`] is recorded exactly once. Remaining entries are
+    /// still processed after the transition (over-funding is allowed up to `funding_target`
+    /// per entry validation; exact semantics follow [`fund_impl`]).
+    ///
+    /// # Errors
+    /// - [`EscrowError::FundingBatchEmpty`] if `contributions` is empty.
+    /// - [`EscrowError::FundingBatchTooLarge`] if `contributions.len() > MAX_FUND_BATCH`.
+    /// - Per-entry: all errors from [`LiquifactEscrow::fund`] for that investor/amount pair.
+    pub fn batch_fund(env: Env, contributions: Vec<(Address, i128)>) -> InvoiceEscrow {
+        let n = contributions.len();
+
+        ensure(&env, n > 0, EscrowError::FundingBatchEmpty);
+        ensure(&env, n <= MAX_FUND_BATCH, EscrowError::FundingBatchTooLarge);
+
+        // Track how much principal this batch call contributes in total.
+        let funded_before: i128 = Self::get_escrow(env.clone()).funded_amount;
+
+        let mut escrow = Self::get_escrow(env.clone());
+        for i in 0..n {
+            let (investor, amount) = contributions.get(i).unwrap();
+            // fund_impl handles per-investor require_auth(), all validation, storage
+            // writes, per-entry events, and status transitions.
+            escrow = Self::fund_impl(env.clone(), investor, amount, true, 0);
+        }
+
+        // Total principal credited by this batch call.
+        let total_funded_amount = escrow
+            .funded_amount
+            .checked_sub(funded_before)
+            .unwrap_or(escrow.funded_amount);
+
+        // Emit the single batch-level summary event.
+        BatchFundCompleted {
+            name: symbol_short!("btch_fnd"),
+            invoice_id: escrow.invoice_id.clone(),
+            total_funded_amount,
+            investor_count: n,
+            escrow_funded_amount: escrow.funded_amount,
+            status: escrow.status,
+        }
+        .publish(&env);
 
         escrow
     }
