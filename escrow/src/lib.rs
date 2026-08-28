@@ -257,6 +257,8 @@ pub const MAX_STATE_SNAPSHOTS: u32 = 16;
 pub enum EscrowError {
     /// [`LiquifactEscrow::init`] rejected a non-positive invoice amount.
     AmountMustBePositive = 1,
+    /// [`LiquifactEscrow::init`] rejected a non-positive `funding_target` (must be > 0).
+    InvalidFundingTarget = 14,
     /// [`LiquifactEscrow::init`] rejected `yield_bps` outside `0..=10_000`.
     YieldBpsOutOfRange = 2,
     /// [`LiquifactEscrow::init`] called when escrow storage already exists.
@@ -2362,6 +2364,7 @@ impl LiquifactEscrow {
         }
 
         ensure(&env, amount > 0, EscrowError::AmountMustBePositive);
+        ensure(&env, amount > 0, EscrowError::InvalidFundingTarget);
         ensure(
             &env,
             (0..=10_000).contains(&yield_bps),
