@@ -195,8 +195,10 @@ cargo clippy --all-targets -- -D warnings
 | `record_sme_collateral_commitment` | SME records collateral pledge (metadata only). |
 | `get_escrow` | Read current escrow state. |
 | `get_version` | Read stored `DataKey::Version`. |
-| `export_state` | Admin serializes all enumerable instance-storage state into an `EscrowStateExport` (disaster recovery / migration). |
-| `import_state` | Admin restores instance-storage state from an `EscrowStateExport` onto a fresh, uninitialized instance. |
+| `check_escrow_health` | Read-only health check: returns `(warning_type, funded_ratio_bps, time_to_maturity_secs)` for risk monitoring. |
+| `get_escrow_health` | Formatted health summary with warning label, percentage, and recommendations. |
+| `export_state` | Admin serializes all enumerable instance-storage state into an `EscrowSnapshot` (disaster recovery / migration). |
+| `import_state` | Admin restores instance-storage state from an `EscrowSnapshot` onto a fresh, uninitialized instance. |
 
 ---
 
@@ -255,6 +257,91 @@ See [`docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`](docs/ESCROW_TOKEN_INTEGRATION
 for supported token assumptions, explicit unsupported token warnings, and the
 integration-layer responsibilities required when this contract interacts with
 external token contracts.
+
+---
+
+## SME collateral metadata
+
+See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment` and `CollateralRecordedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
+
+---
+
+## Escrow Health Checks (FEAT-011)
+
+The contract emits typed health warnings when escrow enters risk states (underfunding, imminent maturity, past maturity, etc.) via the new health check API.
+
+### Typed warning codes
+
+| Code | Condition | Mitigation |
+|------|-----------|-----------|
+| 4001 | **Low funding ratio** (< 50% of target) | Increase investor outreach or extend maturity |
+| 4002 | **Close to maturity** (< 1 day) | Verify stakeholders ready for settlement |
+| 4003 | **Over maturity** (past deadline + underfunded) | **Critical:** Admin must extend, settle partial, or escalate |
+| 4004 | **Funding stalled** (reserved for future use) | Investor outreach or maturity extension |
+| 0 | No warning | Escrow in good health |
+
+### Read-only health endpoints
+
+**Low-level:** `check_escrow_health() -> (u32, i64, i64)`
+- Returns: `(warning_type, funded_ratio_bps, time_to_maturity_secs)`
+- No auth required; 100k gas
+
+**High-level:** `get_escrow_health() -> EscrowHealth`
+- Formatted with human-readable labels, percentages, and recommendations
+- Ideal for dashboards and client display
+
+### Example
+
+```rust
+let (warning_type, funded_ratio_bps, time_to_maturity_secs) = 
+    client.check_escrow_health();
+
+// If warning_type == 4001, funding ratio is below 50%
+// If warning_type == 4003, past maturity and underfunded (critical)
+```
+
+See [FEAT_011_HEALTH_CHECK_SPECIFICATION.md](FEAT_011_HEALTH_CHECK_SPECIFICATION.md) for full specification.
+
+---
+
+## Interactive REPL CLI (FEAT-010)
+
+The `escrow-repl` tool enables inspection and debugging of contract state without writing test code.
+
+### Quick start
+
+```bash
+cd repl-cli
+cargo build --release
+
+# Demo mode (mock data)
+./target/release/escrow-repl
+
+# Connect to testnet contract
+./target/release/escrow-repl --network testnet --contract CBXYZ123...
+```
+
+### MVP commands
+
+| Command | Purpose |
+|---------|---------|
+| `get_escrow` | Fetch current escrow state |
+| `get_version` | Fetch contract schema version |
+| `is_dispute_paused` | Check if dispute pause is active |
+| `export_state` | Export complete state snapshot for backup |
+
+All output is pretty-printed JSON, suitable for piping to `jq` or file redirection.
+
+### Examples
+
+```bash
+escrow> get_escrow
+escrow> export_state | jq '.escrow | {status, funded_amount, funding_target}'
+escrow> export_state > backup.json
+escrow> help export_state
+```
+
+See [repl-cli/README.md](repl-cli/README.md) and [docs/escrow-sim-stellar-cli.md (Section 17)](docs/escrow-sim-stellar-cli.md#17-interactive-repl-cli-feature_220) for full documentation.
 
 ---
 
