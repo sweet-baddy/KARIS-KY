@@ -1158,6 +1158,64 @@ fn claim_investor_payout_succeeds_after_settle() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// BUG-005: Token transfer safety checks in sweep_terminal_dust
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// **BUG-005 Test**: `sweep_terminal_dust` validates pre-transfer balance and emits
+/// a typed error if the contract is under-funded, preventing host-level traps.
+///
+/// Scenario:
+/// 1. Settle an escrow with a token balance
+/// 2. Verify the balance (for setup)
+/// 3. Call sweep with an amount greater than the actual balance (simulating under-funding)
+/// 4. Expect a typed error (`InsufficientTokenBalanceBeforeTransfer`) instead of a host trap
+///
+/// This test ensures the contract emits typed errors on insufficient balance before
+/// invoking the token transfer, providing clear feedback to treasury operators.
+#[test]
+#[should_panic(expected = "Insufficient token balance before transfer")]
+fn test_sweep_terminal_dust_underfunded_emits_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (_tok, treasury) = free_addresses(&env);
+    let maturity = 5000u64;
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "SW_BUG005"),
+        &sme,
+        &TARGET,
+        &100i64,
+        &maturity,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund and settle
+    let investor = Address::generate(&env);
+    client.fund(&investor, &1_000i128);
+    client.settle();
+
+    // Mint only 100 tokens into the contract
+    token.stellar.mint(&contract_id, &100i128);
+
+    // Attempt to sweep 200 tokens — should fail with typed error
+    // instead of a host-level trap
+    client.sweep_terminal_dust(&200i128);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Funding snapshot invariant (ADR-003)
 // ──────────────────────────────────────────────────────────────────────────────
 
