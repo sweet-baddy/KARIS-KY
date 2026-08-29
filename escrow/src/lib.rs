@@ -2807,6 +2807,15 @@ impl LiquifactEscrow {
             );
         }
 
+        // Pre-transfer balance validation: ensure the contract has sufficient balance
+        // before invoking the token transfer to emit a typed error instead of a host trap
+        // if the contract is under-funded.
+        ensure(
+            &env,
+            balance >= sweep_amt,
+            EscrowError::InsufficientTokenBalanceBeforeTransfer,
+        );
+
         external_calls::transfer_funding_token_with_balance_checks(
             &env,
             &token_addr,
