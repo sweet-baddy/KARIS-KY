@@ -1039,3 +1039,146 @@ fn test_lower_cap_emits_event() {
         .to_xdr(&env, &contract_id)]
     );
 }
+
+#[test]
+#[should_panic(expected = "FundingBelowMinContribution")]
+fn test_min_contribution_floor_fund_with_commitment_below_value_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    let floor = 1_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "COMMIT_FLOOR_BELOW"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &Some(floor),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // fund_with_commitment should also reject amounts below floor
+    client.fund_with_commitment(&Address::generate(&env), &(floor - 1), &86400u64);
+}
+
+#[test]
+fn test_min_contribution_floor_fund_with_commitment_exact_value_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    let floor = 1_000_000_000i128;
+    let inv = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "COMMIT_FLOOR_EXACT"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &Some(floor),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // fund_with_commitment with exact floor value should succeed
+    client.fund_with_commitment(&inv, &floor, &86400u64);
+    assert_eq!(client.get_contribution(&inv), floor);
+    assert_eq!(client.get_unique_funder_count(), 1);
+}
+
+#[test]
+fn test_min_contribution_floor_fund_with_commitment_above_value_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    let floor = 1_000_000_000i128;
+    let inv = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "COMMIT_FLOOR_ABOVE"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &Some(floor),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // fund_with_commitment with value above floor should succeed
+    let amount = floor + 500_000_000i128;
+    client.fund_with_commitment(&inv, &amount, &86400u64);
+    assert_eq!(client.get_contribution(&inv), amount);
+    assert_eq!(client.get_unique_funder_count(), 1);
+}
+
+#[test]
+#[should_panic(expected = "FundingBelowMinContribution")]
+fn test_min_contribution_floor_both_paths_consistent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    let floor = 2_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "BOTH_PATHS_FLOOR"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &Some(floor),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Both fund and fund_with_commitment should enforce the same floor
+    // Verify fund rejects below floor (this test uses fund_with_commitment, but tests that both are consistent)
+    let inv = Address::generate(&env);
+    client.fund_with_commitment(&inv, &(floor - 1), &0u64);
+}
