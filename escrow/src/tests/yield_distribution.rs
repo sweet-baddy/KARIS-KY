@@ -2,7 +2,7 @@
 //!
 //! This module validates:
 //! 1. Enable/disable automatic yield distribution
-//! 2. Settlement-time snapshot creation with YieldDistributionSnapshotCreated event
+//! 2. Settlement-time snapshot creation with YieldDistSnapshotCreated event
 //! 3. Auto-distributed yield claim with AutoDistributedYieldClaimed event
 //! 4. Fallback to on-demand yield computation when auto-distribution disabled
 //! 5. Backwards compatibility (disabled by default)
@@ -74,11 +74,11 @@ fn enable_auto_distribution_sets_flag() {
     let (client, _investors, _admin, _sme) = setup_yield_distribution_test(&env, 1, 100_000_000_000i128, false);
 
     // Initially disabled (default)
-    assert!(!client.is_yield_auto_distribution_enabled());
+    assert!(!client.is_yield_auto_dist_enabled());
 
     // Enable it
     client.enable_yield_auto_distribution();
-    assert!(client.is_yield_auto_distribution_enabled());
+    assert!(client.is_yield_auto_dist_enabled());
 }
 
 #[test]
@@ -87,11 +87,11 @@ fn disable_auto_distribution_clears_flag() {
     let (client, _investors, _admin, _sme) = setup_yield_distribution_test(&env, 1, 100_000_000_000i128, true);
 
     // Initially enabled
-    assert!(client.is_yield_auto_distribution_enabled());
+    assert!(client.is_yield_auto_dist_enabled());
 
     // Disable it
     client.disable_yield_auto_distribution();
-    assert!(!client.is_yield_auto_distribution_enabled());
+    assert!(!client.is_yield_auto_dist_enabled());
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn auto_distribution_defaults_to_disabled() {
     let (client, _investors, _admin, _sme) = setup_yield_distribution_test(&env, 1, 100_000_000_000i128, false);
 
     // Default is false (backwards compatible)
-    assert!(!client.is_yield_auto_distribution_enabled());
+    assert!(!client.is_yield_auto_dist_enabled());
 }
 
 // ── 2. Settlement snapshot creation ──────────────────────────────────────────
@@ -370,7 +370,7 @@ fn default_escrow_has_auto_dist_disabled() {
     );
 
     // Auto-distribution should be disabled by default
-    assert!(!client.is_yield_auto_distribution_enabled());
+    assert!(!client.is_yield_auto_dist_enabled());
 }
 
 // ── 7. Feature doesn't break existing claim flow ──────────────────────────────

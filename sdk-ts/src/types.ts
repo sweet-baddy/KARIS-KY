@@ -98,6 +98,47 @@ export interface EscrowTemplate {
 }
 
 // ---------------------------------------------------------------------------
+// Event streaming types
+// ---------------------------------------------------------------------------
+
+/** A contract event returned by Soroban RPC, with the escrow contract ID attached. */
+export interface EscrowEvent {
+  id: string;
+  type: string;
+  contract_id: string;
+  ledger: number;
+  ledger_closed_at: string;
+  paging_token: string;
+  topics: unknown[];
+  value: unknown;
+  /** Decoded event name when the RPC adapter can provide it. */
+  name?: string;
+}
+
+/** Result page returned by a Soroban RPC getEvents adapter. */
+export interface SorobanEventPage {
+  events: EscrowEvent[];
+  latest_ledger?: number;
+  cursor?: string;
+}
+
+/** Controls polling, paging, and cancellation for an escrow event stream. */
+export interface EscrowEventSubscriptionOptions {
+  /** First ledger to query. Defaults to the current ledger. */
+  start_ledger?: number;
+  /** Resume from a Soroban paging token. */
+  cursor?: string;
+  /** Optional decoded event names to deliver. */
+  event_names?: readonly string[];
+  /** Delay between empty polls. Defaults to 5 seconds. */
+  poll_interval_ms?: number;
+  /** Maximum events requested per RPC call. Defaults to 100. */
+  limit?: number;
+  /** Stops the stream without throwing when aborted. */
+  signal?: AbortSignal;
+}
+
+// ---------------------------------------------------------------------------
 // Contract constants
 // ---------------------------------------------------------------------------
 

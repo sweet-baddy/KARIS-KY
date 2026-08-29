@@ -132,7 +132,7 @@ fn test_revoke_yield_claim_delegate_requires_investor_auth() {
 }
 
 #[test]
-fn test_claim_investor_payout_as_delegate_basic() {
+fn test_claim_payout_as_delegate_basic() {
     let env = Env::default();
     let (client, _admin, _sme) = auth_audit_init_funded(&env);
 
@@ -151,7 +151,7 @@ fn test_claim_investor_payout_as_delegate_basic() {
 }
 
 #[test]
-fn test_claim_investor_payout_as_delegate_requires_delegation() {
+fn test_claim_payout_as_delegate_requires_delegation() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
@@ -168,12 +168,12 @@ fn test_claim_investor_payout_as_delegate_requires_delegation() {
     client.settle();
 
     // Try to claim as delegate without delegation - should fail
-    let result = client.try_claim_investor_payout_as_delegate(&investor, &delegate);
+    let result = client.try_claim_payout_as_delegate(&investor, &delegate);
     assert_contract_error(result, EscrowError::NoDelegationSet);
 }
 
 #[test]
-fn test_claim_investor_payout_as_delegate_revoked_fails() {
+fn test_claim_payout_as_delegate_revoked_fails() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
@@ -194,12 +194,12 @@ fn test_claim_investor_payout_as_delegate_revoked_fails() {
     client.settle();
 
     // Try to claim as delegate - should fail because delegation is revoked
-    let result = client.try_claim_investor_payout_as_delegate(&investor, &delegate);
+    let result = client.try_claim_payout_as_delegate(&investor, &delegate);
     assert_contract_error(result, EscrowError::DelegationRevoked);
 }
 
 #[test]
-fn test_claim_investor_payout_as_delegate_wrong_delegate_fails() {
+fn test_claim_payout_as_delegate_wrong_delegate_fails() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
@@ -220,7 +220,7 @@ fn test_claim_investor_payout_as_delegate_wrong_delegate_fails() {
     client.settle();
 
     // Try to claim as wrong delegate - should fail
-    let result = client.try_claim_investor_payout_as_delegate(&investor, &wrong_delegate);
+    let result = client.try_claim_payout_as_delegate(&investor, &wrong_delegate);
     assert_contract_error(result, EscrowError::NoDelegationSet);
 }
 

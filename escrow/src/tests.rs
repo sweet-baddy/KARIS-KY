@@ -143,8 +143,11 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None,
         &None,
         &None,
+        &None, // No max funding rate
         &None, // No yield slippage threshold
         &None, // No settlement notifier
+        &None, // No KYC provider
+        &None, // No admin roles
     );
 }
 
