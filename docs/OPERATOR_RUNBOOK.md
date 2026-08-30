@@ -468,7 +468,180 @@ first implementing the migration path.
 
 ---
 
-## 10. Glossary
+## 11. Canary deployment post-mortem template
+
+Use this template any time a canary deployment results in an incident, an
+emergency rollback, or a promoted-to-production issue that was not caught
+during the canary window. Fill it in within 48 hours of resolution and
+archive it under `docs/post-mortems/YYYY-MM-DD-canary-<description>.md`.
+
+---
+
+### Post-mortem: \<title\>
+
+**Date of incident:** YYYY-MM-DD  
+**Post-mortem author(s):** \<name(s)\>  
+**CanaryOperator on duty:** \<name\>  
+**Canary WASM hash:** `<hash>`  
+**Canary instance IDs:** `CAAA...`, `CBBB...`  
+**Production WASM hash (if promoted):** `<hash or N/A>`  
+**Status at time of filing:** `Resolved / Ongoing / Monitoring`
+
+---
+
+#### 1. Executive summary
+
+*One paragraph. What happened, when, what was impacted, and how it was
+resolved. Written for a non-technical governance audience.*
+
+---
+
+#### 2. Incident timeline
+
+| UTC timestamp | Event |
+|---------------|-------|
+| HH:MM | WASM uploaded to mainnet (`stellar contract upload`) |
+| HH:MM | Legal hold activated on canary instances |
+| HH:MM | Upgrade invoked on canary instances |
+| HH:MM | Legal hold cleared; canary monitoring begins |
+| HH:MM | **[First signal]** — describe observation |
+| HH:MM | CanaryOperator escalated to Ops/Security |
+| HH:MM | Rollback decision made by: \<name/role\> |
+| HH:MM | Rollback invocation issued (old WASM hash: `<hash>`) |
+| HH:MM | All canary instances confirmed reverted |
+| HH:MM | Incident declared resolved |
+
+---
+
+#### 3. Impact
+
+| Dimension | Assessment |
+|-----------|-----------|
+| Investor funds at risk? | Yes / No — explain |
+| Operations blocked? | Which entrypoints, how long |
+| Escrow instances affected | List contract IDs and status |
+| Investor complaints received | Count and nature |
+| Legal hold required on production? | Yes / No |
+| Production instances affected? | Yes (list) / No |
+| Data integrity compromised? | Yes / No — evidence |
+| SLA breach? | Yes / No — if yes, document SLA terms |
+
+---
+
+#### 4. Root cause analysis
+
+*Use the 5-why method or a fishbone diagram as appropriate.*
+
+**Immediate cause:**  
+\<What directly triggered the incident — e.g., a panicking `assert!` on a stored XDR field\>
+
+**Contributing factors:**
+
+1. \<Factor 1 — e.g., unit tests did not cover the affected XDR shape change\>
+2. \<Factor 2 — e.g., testnet mirror did not have the same data distribution as mainnet\>
+3. \<Factor 3 — add more as needed\>
+
+**Root cause:**  
+\<The underlying systemic cause — e.g., no policy enforcing storage compatibility checks before WASM upload\>
+
+---
+
+#### 5. Contract-specific investigation
+
+*Fill in all sections that are relevant to the incident.*
+
+**Schema version on affected instances before incident:**  
+`SCHEMA_VERSION = X`
+
+**Was `migrate()` called?** Yes / No  
+If yes: what happened? \<Error code, any storage writes?\>
+
+**Was `InvoiceEscrow` XDR shape changed?** Yes / No  
+If yes: which fields? Was this a breaking layout change?
+
+**Were per-investor persistent keys affected?** Yes / No  
+If yes: list `DataKey` variants; describe read/write failures observed.
+
+**Was `DisputePaused` or `LegalHold` active at time of incident?**  
+\<Yes / No; if yes, describe interaction with the failure mode\>
+
+**`check_escrow_health()` state at time of incident:**  
+Warning code: `XXXX` / Funded ratio bps: `XXXX` / Time to maturity: `XXXX s`
+
+**Off-chain indexers affected?** Yes / No  
+If yes: describe the impact on downstream systems.
+
+---
+
+#### 6. What went well
+
+*Genuine positives — things that helped contain or detect the incident.*
+
+- \<e.g., Canary window caught the issue before production rollout\>
+- \<e.g., Legal hold activation during upgrade window protected investor funds\>
+- \<e.g., Monitoring script `canary_health_1h.sh` flagged the RPC error within 5 minutes\>
+
+---
+
+#### 7. What went wrong
+
+*Honest failures — no blame, only system-level observations.*
+
+- \<e.g., The testnet staging environment did not have enough funded escrows to expose the issue\>
+- \<e.g., The rollback decision took 40 minutes because the escalation chain was unclear\>
+
+---
+
+#### 8. Corrective actions
+
+Each action must have an owner and a due date. Track in the project issue tracker.
+
+| Action | Owner | Due date | Issue / PR |
+|--------|-------|----------|------------|
+| Add a test that covers the failing XDR shape | \<name\> | YYYY-MM-DD | `#NNN` |
+| Update the canary instance selection criteria to include funded escrows | \<name\> | YYYY-MM-DD | `#NNN` |
+| Define escalation chain in canary checklist (Section 2.2) | \<name\> | YYYY-MM-DD | `#NNN` |
+| Update `SCHEMA_VERSION` changelog with breaking-change annotation | \<name\> | YYYY-MM-DD | `#NNN` |
+
+---
+
+#### 9. Governance notifications
+
+- [ ] Governance notified of incident: Date/time \_\_\_\_\_\_, method \_\_\_\_\_\_
+- [ ] Investors notified (if funds blocked > 1 hour): Date/time \_\_\_\_\_\_, channel \_\_\_\_\_\_
+- [ ] Security team notified (if data integrity risk): Date/time \_\_\_\_\_\_
+- [ ] Post-mortem report filed in `docs/post-mortems/`: \_\_\_\_\_\_\_\_\_\_
+- [ ] Corrective action items opened in issue tracker: \_\_\_\_\_\_\_\_\_\_
+
+---
+
+#### 10. Sign-off
+
+```
+Post-mortem reviewed by:
+
+CanaryOperator:  ________________________  Date: ______________
+Ops lead:        ________________________  Date: ______________
+Security:        ________________________  Date: ______________
+Governance:      ________________________  Date: ______________
+
+Incident severity:   P1 (critical)  P2 (major)  P3 (minor)
+Production impact:   Yes / No
+Recurrence risk:     High / Medium / Low
+```
+
+---
+
+> **Archive location:** `docs/post-mortems/YYYY-MM-DD-canary-<slug>.md`
+>
+> **Naming convention:** Use the ISO date of the deployment that caused the
+> incident, not the date the post-mortem is written. The slug should be a
+> short kebab-case description, e.g., `2026-08-30-canary-xdr-shape-mismatch`.
+>
+> See [`docs/CANARY_DEPLOYMENT_STRATEGY.md`](CANARY_DEPLOYMENT_STRATEGY.md)
+> for the full staged rollout procedure and
+> [`docs/CANARY_DEPLOYMENT_CHECKLIST.md`](CANARY_DEPLOYMENT_CHECKLIST.md)
+> for the per-deployment checklist.
 
 | Term | Meaning in this context |
 |------|------------------------|
