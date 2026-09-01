@@ -4127,7 +4127,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::dispute_is_active(&env),
             EscrowError::DisputePausedBlocksInvestorClaims,
         );
 
@@ -6466,7 +6466,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::dispute_is_active(&env),
             EscrowError::DisputePausedBlocksSettlement,
         );
 
@@ -6836,7 +6836,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::dispute_is_active(&env),
             EscrowError::DisputePausedBlocksWithdrawal,
         );
 
@@ -6941,7 +6941,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::dispute_is_active(&env),
             EscrowError::DisputePausedBlocksInvestorClaims,
         );
 
@@ -7174,7 +7174,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::dispute_is_active(&env),
             EscrowError::DisputePausedBlocksInvestorClaims,
         );
 
@@ -7286,7 +7286,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::dispute_is_active(&env),
             EscrowError::DisputePausedBlocksInvestorClaims,
         );
 
@@ -8296,15 +8296,17 @@ impl LiquifactEscrow {
         .publish(&env);
     }
 
-    /// Check if a dispute pause is currently active on this escrow.
+    /// Single source-of-truth for the dispute-pause active check.
     ///
-    /// Includes auto-expiration logic: if the pause was configured to expire and
-    /// current ledger time has reached/exceeded the expiration, the pause is
-    /// considered inactive (although the storage entry is not automatically cleaned).
-    /// 
-    /// # Returns
-    /// `true` if a dispute pause exists and has not auto-expired; `false` otherwise.
-    fn is_dispute_paused(env: &Env) -> bool {
+    /// Returns `true` when a [`DataKey::DisputePaused`] entry exists **and**
+    /// the current ledger timestamp is strictly before
+    /// `expires_at_ledger_timestamp`.  All other code (internal guards and the
+    /// public [`LiquifactEscrow::is_dispute_paused`] entrypoint) must delegate
+    /// here so the expiry comparison never diverges between callers.
+    ///
+    /// Using timestamp (`u64`) instead of ledger sequence avoids the `u32`
+    /// overflow edge-case described in BUG-003.
+    fn dispute_is_active(env: &Env) -> bool {
         let pause_state: Option<DisputePauseState> = env
             .storage()
             .instance()
@@ -8312,29 +8314,39 @@ impl LiquifactEscrow {
 
         if let Some(state) = pause_state {
             let now = env.ledger().timestamp();
-            // Pause is active if current time is before expiration
+            // Active only while ledger time is strictly before the expiry.
+            // u64 subtraction is not involved here, so there is no overflow
+            // risk even when expires_at is near u64::MAX.
             now < state.expires_at_ledger_timestamp
         } else {
             false
         }
     }
 
+    /// Public entrypoint: check if a dispute pause is currently active.
+    ///
+    /// Delegates to the internal [`Self::dispute_is_active`] helper so the
+    /// expiry logic is never duplicated.  Returns `true` if a pause exists and
+    /// has not yet auto-expired; `false` otherwise.
+    pub fn is_dispute_paused(env: Env) -> bool {
+        Self::dispute_is_active(&env)
+    }
+
     /// Get the current dispute pause state, if active.
     ///
     /// Returns `None` if no pause is active or if the pause has auto-expired.
+    /// Uses [`Self::dispute_is_active`] for the expiry check so all callers
+    /// share the same logic.
     pub fn get_dispute_pause(env: Env) -> Option<DisputePauseState> {
-        let pause_state: Option<DisputePauseState> = env
-            .storage()
-            .instance()
-            .get(&DataKey::DisputePaused);
-
-        if let Some(state) = pause_state {
-            let now = env.ledger().timestamp();
-            if now < state.expires_at_ledger_timestamp {
-                return Some(state);
-            }
+        if !Self::dispute_is_active(&env) {
+            return None;
         }
-        None
+
+        // dispute_is_active already confirmed the entry exists and is not
+        // expired, so the unwrap below is safe.
+        env.storage()
+            .instance()
+            .get(&DataKey::DisputePaused)
     }
 }
 
