@@ -2750,3 +2750,200 @@ fn test_migrate_diagnostic_event_version_delta() {
         "migrate should emit MigrationDiagnosticEmitted event before error"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BUG-003: dispute auto-expiration not enforced on settle path
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Regression test: `settle` must use the same `dispute_is_active` helper as
+// `is_dispute_paused` so that an expired pause never blocks settlement.
+// The original bug was a divergence between the inline check inside `settle`
+// and the helper used by `is_dispute_paused`; both now delegate to the single
+// `dispute_is_active` function.
+//
+// Covers:
+//  1. Settle is blocked while the dispute pause is active.
+//  2. After the ledger timestamp advances past `expires_at_ledger_timestamp`,
+//     `is_dispute_paused()` returns false AND settle succeeds — without any
+//     `resume_dispute` call.
+//  3. The same expiry logic applies even when the expiry timestamp is large
+//     (no edge-case divergence near timestamp limits).
+
+/// BUG-003 regression: expired dispute pause must not block settle.
+///
+/// Steps:
+/// 1. Fund the escrow to status 1.
+/// 2. Pause the dispute with a 1-hour duration.
+/// 3. Confirm `is_dispute_paused()` is true and settle is blocked.
+/// 4. Advance ledger time to exactly the expiry timestamp.
+/// 5. Confirm `is_dispute_paused()` is false and settle succeeds.
+#[test]
+fn test_bug003_expired_dispute_pause_does_not_block_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    // Use a base timestamp well away from zero so the arithmetic is realistic.
+    let base_ts: u64 = 1_700_000_000;
+    env.ledger().set_timestamp(base_ts);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "BUG003-1"),
+        &sme,
+        &200_000i128,
+        &400i64,
+        &0u64, // no maturity lock
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund to status 1 (funded).
+    client.fund(&investor, &200_000i128);
+    assert_eq!(client.get_escrow().status, 1, "escrow must be funded before settle");
+
+    // --- Step 2: pause for 3 600 seconds (1 hour) ---
+    let pause_duration_secs: u64 = 3_600;
+    client.pause_dispute(
+        &soroban_sdk::String::from_str(&env, "BUG003-ticket-001"),
+        &pause_duration_secs,
+    );
+
+    let expiry_ts = base_ts + pause_duration_secs;
+
+    // --- Step 3: pause is active; settle must fail ---
+    assert!(
+        client.is_dispute_paused(),
+        "is_dispute_paused() must be true immediately after pause_dispute",
+    );
+
+    assert_contract_error(
+        client.try_settle(),
+        EscrowError::DisputePausedBlocksSettlement,
+    );
+
+    // One second before expiry — still blocked.
+    env.ledger().set_timestamp(expiry_ts - 1);
+    assert!(
+        client.is_dispute_paused(),
+        "is_dispute_paused() must be true 1 second before expiry",
+    );
+    assert_contract_error(
+        client.try_settle(),
+        EscrowError::DisputePausedBlocksSettlement,
+    );
+
+    // --- Step 4: advance to exactly the expiry timestamp ---
+    env.ledger().set_timestamp(expiry_ts);
+
+    // --- Step 5: pause expired; settle must succeed without resume_dispute ---
+    assert!(
+        !client.is_dispute_paused(),
+        "is_dispute_paused() must be false at/after expiry (auto-expiry)",
+    );
+
+    // get_dispute_pause must also report None (consistent with is_dispute_paused).
+    assert!(
+        client.get_dispute_pause().is_none(),
+        "get_dispute_pause() must return None after auto-expiry",
+    );
+
+    // Settle succeeds — proving settle uses the same shared helper.
+    client.settle();
+    assert_eq!(
+        client.get_escrow().status,
+        2,
+        "escrow must reach settled status after expired dispute pause",
+    );
+}
+
+/// BUG-003 regression: expiry check is consistent at a large timestamp value.
+///
+/// Exercises the comparison with an expiry timestamp near the upper end of
+/// realistic u64 values (year ~2500) to confirm no overflow or divergence.
+#[test]
+fn test_bug003_large_timestamp_expiry_settle_proceeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    // Start at a large but representable timestamp.
+    // MAX_DISPUTE_PAUSE_DURATION_SECS = 14 days = 1_209_600 s.
+    // Base chosen so base + 1_209_600 is still far from u64::MAX.
+    let base_ts: u64 = 16_000_000_000; // ~year 2477
+    env.ledger().set_timestamp(base_ts);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "BUG003-2"),
+        &sme,
+        &100_000i128,
+        &200i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &100_000i128);
+    assert_eq!(client.get_escrow().status, 1);
+
+    // Pause for the maximum allowed duration (14 days).
+    let max_duration: u64 = 14 * 24 * 60 * 60; // 1_209_600
+    client.pause_dispute(
+        &soroban_sdk::String::from_str(&env, "BUG003-ticket-002"),
+        &max_duration,
+    );
+
+    let expiry_ts = base_ts + max_duration;
+
+    // Active before expiry.
+    assert!(
+        client.is_dispute_paused(),
+        "pause must be active immediately after pause_dispute",
+    );
+    assert_contract_error(
+        client.try_settle(),
+        EscrowError::DisputePausedBlocksSettlement,
+    );
+
+    // Expired at expiry_ts.
+    env.ledger().set_timestamp(expiry_ts);
+    assert!(
+        !client.is_dispute_paused(),
+        "pause must be inactive at expiry — no overflow at large timestamp",
+    );
+
+    // Settle proceeds without resume_dispute.
+    client.settle();
+    assert_eq!(
+        client.get_escrow().status,
+        2,
+        "settle must succeed after large-timestamp expiry",
+    );
+}
