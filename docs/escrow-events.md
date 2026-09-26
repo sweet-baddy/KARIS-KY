@@ -108,6 +108,28 @@ Emitted when the SME finalizes the escrow after maturity.
 }
 ```
 
+### `SmeWithdrew`
+Emitted by `withdraw` after the funded principal has been transferred to the SME and the escrow status has moved to `3` (withdrawn).
+
+**Topics:**
+1. `sme_wd` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `amount` (i128) — the escrow's `funded_amount`, transferred to the SME
+- `recipient` (Address) — the escrow's `sme_address`
+
+**Example (JSON Decoded):**
+```json
+{
+  "topics": ["sme_wd", "INV_001"],
+  "data": {
+    "amount": "10000000000",
+    "recipient": "G...SME"
+  }
+}
+```
+
 ### `InvestorPayoutClaimed`
 Emitted when an investor records their payout claim.
 

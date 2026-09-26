@@ -356,6 +356,7 @@ Data:
 | Field | Type |
 |---|---|
 | `amount` | `i128` |
+| `recipient` | `Address` |
 
 ### `InvestorPayoutClaimed`
 
