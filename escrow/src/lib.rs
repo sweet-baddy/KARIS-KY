@@ -122,6 +122,144 @@ use soroban_sdk::{
     symbol_short, token::TokenClient, Address, Bytes, BytesN, Env, Executable, String, Symbol, Vec,
 };
 
+struct PerInvestorStorage<'a> {
+    env: &'a Env,
+}
+
+impl<'a> PerInvestorStorage<'a> {
+    fn new(env: &'a Env) -> Self {
+        Self { env }
+    }
+
+    fn get_contribution(&self, investor: Address) -> i128 {
+        self.env
+            .storage()
+            .persistent()
+            .get(&DataKey::InvestorContribution(investor))
+            .unwrap_or(0)
+    }
+
+    fn set_contribution(&self, investor: Address, amount: i128) {
+        self.env
+            .storage()
+            .persistent()
+            .set(&DataKey::InvestorContribution(investor), &amount);
+    }
+
+    fn get_effective_yield(&self, investor: Address) -> Option<i64> {
+        self.env
+            .storage()
+            .persistent()
+            .get(&DataKey::InvestorEffectiveYield(investor))
+    }
+
+    fn set_effective_yield(&self, investor: Address, value: i64) {
+        self.env
+            .storage()
+            .persistent()
+            .set(&DataKey::InvestorEffectiveYield(investor), &value);
+    }
+
+    fn get_claim_not_before(&self, investor: Address) -> u64 {
+        self.env
+            .storage()
+            .persistent()
+            .get(&DataKey::InvestorClaimNotBefore(investor))
+            .unwrap_or(0)
+    }
+
+    fn set_claim_not_before(&self, investor: Address, value: u64) {
+        self.env
+            .storage()
+            .persistent()
+            .set(&DataKey::InvestorClaimNotBefore(investor), &value);
+    }
+
+    fn get_lock_in_until(&self, investor: Address) -> u64 {
+        self.env
+            .storage()
+            .persistent()
+            .get(&DataKey::InvestorLockInUntil(investor))
+            .unwrap_or(0)
+    }
+
+    fn set_lock_in_until(&self, investor: Address, value: u64) {
+        self.env
+            .storage()
+            .persistent()
+            .set(&DataKey::InvestorLockInUntil(investor), &value);
+    }
+
+    fn get_claimed(&self, investor: Address) -> bool {
+        self.env
+            .storage()
+            .persistent()
+            .get(&DataKey::InvestorClaimed(investor))
+            .unwrap_or(false)
+    }
+
+    fn set_claimed(&self, investor: Address, value: bool) {
+        self.env
+            .storage()
+            .persistent()
+            .set(&DataKey::InvestorClaimed(investor), &value);
+    }
+
+    fn get_allowlisted(&self, investor: Address) -> bool {
+        self.env
+            .storage()
+            .persistent()
+            .get(&DataKey::InvestorAllowlisted(investor))
+            .unwrap_or(false)
+    }
+
+    fn set_allowlisted(&self, investor: Address, allowed: bool) {
+        self.env
+            .storage()
+            .persistent()
+            .set(&DataKey::InvestorAllowlisted(investor), &allowed);
+    }
+
+    fn get_yield_claim_delegate(&self, investor: Address) -> Option<Address> {
+        self.env
+            .storage()
+            .persistent()
+            .get(&DataKey::YieldClaimDelegate(investor))
+    }
+
+    fn set_yield_claim_delegate(&self, investor: Address, delegate: Address) {
+        self.env
+            .storage()
+            .persistent()
+            .set(&DataKey::YieldClaimDelegate(investor), &delegate);
+    }
+
+    fn get_yield_claim_delegate_revoked(&self, investor: Address) -> bool {
+        self.env
+            .storage()
+            .persistent()
+            .get(&DataKey::YieldClaimDelegateRevoked(investor))
+            .unwrap_or(false)
+    }
+
+    fn set_yield_claim_delegate_revoked(&self, investor: Address, revoked: bool) {
+        self.env
+            .storage()
+            .persistent()
+            .set(&DataKey::YieldClaimDelegateRevoked(investor), &revoked);
+    }
+}
+
+trait PerInvestorStorageExt {
+    fn per_investor(&self) -> PerInvestorStorage;
+}
+
+impl PerInvestorStorageExt for Env {
+    fn per_investor(&self) -> PerInvestorStorage {
+        PerInvestorStorage::new(self)
+    }
+}
+
 pub mod external_calls;
 pub mod validation;
 
@@ -713,7 +851,7 @@ pub struct InvoiceEscrow {
     pub funding_target: i128,
     pub funded_amount: i128,
     pub yield_bps: i64,
-    pub maturity: u64,
+    pub maturity: u32,
     /// 0 = open, 1 = funded, 2 = settled, 3 = withdrawn (SME pulled liquidity), 4 = cancelled (admin-gated; investors may refund), 5 = archived (admin-gated; read-only terminal)
     pub status: u32,
     pub guardian: Option<Address>,
@@ -899,10 +1037,7 @@ pub struct ComplianceReport {
 pub struct SmeCollateralCommitment {
     pub asset: Symbol,
     pub amount: i128,
-    /// Ledger timestamp of the **first** record call. Never mutated after initial write.
-    pub recorded_at: u64,
-    /// Ledger timestamp of the most recent write (initial or update). Always >= `recorded_at`.
-    pub updated_at: u64,
+    pub recorded_at: u32,
 }
 
 /// Incremental state change record for delta-encoded snapshots.
@@ -915,13 +1050,13 @@ pub struct SnapshotDelta {
     /// Unique ID of this delta (monotonically increasing).
     pub delta_id: u32,
     /// Ledger timestamp when this delta was recorded.
-    pub recorded_at: u64,
+    pub recorded_at: u32,
     /// Previous delta ID this one is based on (0 for baseline/first delta).
     pub based_on_delta_id: u32,
     /// Change in funded amount (signed; may be negative for reversals).
     pub funded_amount_delta: i128,
     /// New maturity value (0 if unchanged).
-    pub maturity: u64,
+    pub maturity: u32,
     /// New status (255 if unchanged).
     pub status: u32,
     /// New admin address (None if unchanged).
@@ -936,7 +1071,7 @@ pub struct SnapshotDelta {
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct YieldTier {
-    pub min_lock_secs: u64,
+    pub min_lock_secs: u32,
     pub yield_bps: i64,
 }
 
@@ -952,7 +1087,7 @@ pub struct FundingCloseSnapshot {
     /// including over-funding past target.
     pub total_principal: i128,
     pub funding_target: i128,
-    pub closed_at_ledger_timestamp: u64,
+    pub closed_at_ledger_timestamp: u32,
     pub closed_at_ledger_sequence: u32,
 }
 
@@ -1002,7 +1137,7 @@ pub struct TokenMetadataCache {
     /// Token decimal places (e.g., 7 for Stellar USDC)
     pub decimals: u32,
     /// Ledger timestamp when cache was written (for staleness detection)
-    pub cached_at_ledger_timestamp: u64,
+    pub cached_at_ledger_timestamp: u32,
     /// Ledger sequence when cache was written (for staleness detection)
     pub cached_at_ledger_sequence: u32,
 }
@@ -1101,8 +1236,8 @@ pub enum SettlementNftSnapshot {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisputePauseState {
     pub ticket_id: String,
-    pub paused_at_ledger_timestamp: u64,
-    pub expires_at_ledger_timestamp: u64,
+    pub paused_at_ledger_timestamp: u32,
+    pub expires_at_ledger_timestamp: u32,
 }
 
 // --- Events ---
@@ -1163,7 +1298,7 @@ pub struct EscrowFunded {
     pub investor_effective_yield_bps: i64,
     /// The `min_lock_secs` of the matched [`YieldTier`] (0 when base yield applies — no tier,
     /// no lock commitment, or simple fund). See [`LiquifactEscrow::effective_yield_for_commitment`].
-    pub tier_lock_secs: u64,
+    pub tier_lock_secs: u32,
 }
 
 /// Versioned counterpart to [`EscrowFunded`] carrying `actor` + `timestamp`, mirroring the
@@ -1250,9 +1385,9 @@ pub struct EscrowSettled {
     pub invoice_id: Symbol,
     pub funded_amount: i128,
     pub yield_bps: i64,
-    pub maturity: u64,
+    pub maturity: u32,
     /// Ledger timestamp at which the settlement occurred.
-    pub settled_at_ledger_timestamp: u64,
+    pub settled_at_ledger_timestamp: u32,
 }
 
 #[contractevent]
@@ -1264,9 +1399,9 @@ pub struct EscrowPartiallySettled {
     pub funded_amount: i128,
     pub settled_amount: i128,
     pub yield_bps: i64,
-    pub maturity: u64,
+    pub maturity: u32,
     /// Ledger timestamp at which the partial settlement occurred.
-    pub settled_at_ledger_timestamp: u64,
+    pub settled_at_ledger_timestamp: u32,
 }
 
 #[contractevent]
@@ -1275,8 +1410,8 @@ pub struct MaturityUpdatedEvent {
     pub name: Symbol,
     #[topic]
     pub invoice_id: Symbol,
-    pub old_maturity: u64,
-    pub new_maturity: u64,
+    pub old_maturity: u32,
+    pub new_maturity: u32,
 }
 
 #[contractevent]
@@ -1361,7 +1496,7 @@ pub struct LegalHoldClearRequested {
     #[topic]
     pub invoice_id: Symbol,
     /// Inclusive ledger timestamp when clearing may occur.
-    pub clearable_at: u64,
+    pub clearable_at: u32,
 }
 
 #[contractevent]
@@ -1396,8 +1531,8 @@ pub struct DisputePausedEvt {
     pub ticket_id: String,
     /// `1` = paused, `0` = resumed.
     pub action: u32,
-    pub paused_at: u64,
-    pub expires_at: u64,
+    pub paused_at: u32,
+    pub expires_at: u32,
 }
 
 #[contracttype]
@@ -3676,576 +3811,68 @@ impl LiquifactEscrow {
         log
     }
 
-    /// Read the complete attestation digest log in insertion order.
-    pub fn get_attestation_log(env: Env) -> Vec<BytesN<32>> {
-        Self::get_attestation_append_log(env)
-    }
-
-    // --- Persistent per-investor storage helpers ---
     fn get_persistent_investor_contribution(env: &Env, investor: Address) -> i128 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::InvestorContribution(investor))
-            .unwrap_or(0)
+        PerInvestorStorage::new(env).get_contribution(investor)
     }
 
     fn set_persistent_investor_contribution(env: &Env, investor: Address, amount: i128) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorContribution(investor), &amount);
+        env.per_investor().set_contribution(investor, amount);
     }
 
     fn get_persistent_investor_effective_yield(env: &Env, investor: Address) -> Option<i64> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::InvestorEffectiveYield(investor))
+        env.per_investor().get_effective_yield(investor)
     }
 
     fn set_persistent_investor_effective_yield(env: &Env, investor: Address, value: i64) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorEffectiveYield(investor), &value);
+        env.per_investor().set_effective_yield(investor, value);
     }
 
     fn get_persistent_investor_claim_not_before(env: &Env, investor: Address) -> u64 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::InvestorClaimNotBefore(investor))
-            .unwrap_or(0)
+        env.per_investor().get_claim_not_before(investor)
     }
 
     fn set_persistent_investor_claim_not_before(env: &Env, investor: Address, value: u64) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorClaimNotBefore(investor), &value);
+        env.per_investor().set_claim_not_before(investor, value);
     }
 
     fn get_persistent_investor_lock_in_until(env: &Env, investor: Address) -> u64 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::InvestorLockInUntil(investor))
-            .unwrap_or(0)
+        env.per_investor().get_lock_in_until(investor)
     }
 
     fn set_persistent_investor_lock_in_until(env: &Env, investor: Address, value: u64) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorLockInUntil(investor), &value);
+        env.per_investor().set_lock_in_until(investor, value);
     }
 
     fn get_persistent_investor_claimed(env: &Env, investor: Address) -> bool {
-        env.storage()
-            .persistent()
-            .get(&DataKey::InvestorClaimed(investor))
-            .unwrap_or(false)
+        env.per_investor().get_claimed(investor)
     }
 
     fn set_persistent_investor_claimed(env: &Env, investor: Address, value: bool) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorClaimed(investor), &value);
+        env.per_investor().set_claimed(investor, value);
     }
 
-    /// Read the delegated address for an investor's yield claim, if set.
-    /// **Persistent** storage. Absent ⇒ `None` (no delegation).
+    fn get_persistent_investor_allowlisted(env: &Env, investor: Address) -> bool {
+        env.per_investor().get_allowlisted(investor)
+    }
+
+    fn set_persistent_investor_allowlisted(env: &Env, investor: Address, allowed: bool) {
+        env.per_investor().set_allowlisted(investor, allowed);
+    }
+
     fn get_persistent_yield_claim_delegate(env: &Env, investor: Address) -> Option<Address> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::YieldClaimDelegate(investor.clone()))
+        env.per_investor().get_yield_claim_delegate(investor)
     }
 
-    /// Set the delegated address for an investor's yield claim.
-    /// **Persistent** storage.
     fn set_persistent_yield_claim_delegate(env: &Env, investor: Address, delegate: Address) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::YieldClaimDelegate(investor), &delegate);
+        env.per_investor().set_yield_claim_delegate(investor, delegate)
     }
 
-    /// Get the pre-computed yield distribution share for an investor (if auto-distribution is enabled).
-    /// **Persistent** storage. Absent ⇒ `None` (no automatic distribution or already claimed).
-    fn get_persistent_yield_distribution_share(
-        env: &Env,
-        investor: Address,
-    ) -> Option<YieldDistributionSnapshot> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::YieldDistributionShare(investor))
-    }
-
-    /// Set the pre-computed yield distribution share for an investor at settlement time.
-    /// **Persistent** storage.
-    fn set_persistent_yield_distribution_share(
-        env: &Env,
-        investor: Address,
-        snapshot: YieldDistributionSnapshot,
-    ) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::YieldDistributionShare(investor), &snapshot);
-    }
-
-    /// Check whether automatic yield distribution is enabled for this escrow.
-    fn yield_auto_distribution_enabled(env: &Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&DataKey::YieldAutoDistributionEnabled)
-            .unwrap_or(false)
-    }
-
-    /// Check whether a delegation has been explicitly revoked.
-    /// **Persistent** storage. Absent ⇒ `false` (not revoked or never delegated).
     fn get_persistent_yield_claim_delegate_revoked(env: &Env, investor: Address) -> bool {
-        env.storage()
-            .persistent()
-            .get(&DataKey::YieldClaimDelegateRevoked(investor))
-            .unwrap_or(false)
+        env.per_investor().get_yield_claim_delegate_revoked(investor)
     }
 
-    /// Mark a delegation as revoked.
-    /// **Persistent** storage.
     fn set_persistent_yield_claim_delegate_revoked(env: &Env, investor: Address, revoked: bool) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::YieldClaimDelegateRevoked(investor), &revoked);
-    }
-
-    /// Read an investor's funding checkpoint history.
-    /// **Persistent** storage. Absent ⇒ empty vector.
-    fn get_persistent_investor_history(env: &Env, investor: Address) -> Vec<InvestorFundingRecord> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::InvestorFundingHistory(investor))
-            .unwrap_or_else(|| Vec::new(env))
-    }
-
-    /// Append a checkpoint record to an investor's funding history, bounded by
-    /// [`MAX_INVESTOR_HISTORY_ENTRIES`]. Silently stops appending once the cap is
-    /// reached — the audit trail is a best-effort convenience, not the source of
-    /// truth for principal (that remains [`DataKey::InvestorContribution`]).
-    fn append_investor_history_record(
-        env: &Env,
-        investor: Address,
-        checkpoint: Symbol,
-        amount: i128,
-        cumulative_total: i128,
-    ) {
-        let mut history = Self::get_persistent_investor_history(env, investor.clone());
-        if (history.len() as u32) < MAX_INVESTOR_HISTORY_ENTRIES {
-            history.push_back(InvestorFundingRecord {
-                checkpoint,
-                timestamp: env.ledger().timestamp(),
-                amount,
-                cumulative_total,
-            });
-            env.storage()
-                .persistent()
-                .set(&DataKey::InvestorFundingHistory(investor), &history);
-        }
-    }
-
-    // --- KYC gating (see #155) ---
-
-    /// Checks `investor` against the configured [`DataKey::KycProviderContract`], if any.
-    ///
-    /// No-op when no KYC provider is configured (KYC gating is opt-in via
-    /// [`LiquifactEscrow::init`]'s `kyc_provider_contract` parameter).
-    ///
-    /// # KYC provider contract interface
-    /// The configured contract **must** expose an entrypoint with this shape:
-    /// ```text
-    /// fn is_verified(env: Env, investor: Address) -> bool
-    /// ```
-    /// returning `true` only for addresses that have completed the provider's off-chain
-    /// identity/KYC checks. Any other return type, a panic, or a missing entrypoint causes
-    /// this call (and therefore the funding call) to fail.
-    fn check_kyc(env: &Env, investor: &Address) {
-        let provider: Option<Address> = env.storage().instance().get(&DataKey::KycProviderContract);
-        if let Some(provider) = provider {
-            let args = soroban_sdk::vec![env, investor.to_val()];
-            let verified: bool =
-                env.invoke_contract(&provider, &Symbol::new(env, "is_verified"), args);
-            ensure(env, verified, EscrowError::InvestorNotVerified);
-        }
-    }
-
-    /// Screens `addr` against the configured [`DataKey::SanctionsProvider`], when set.
-    ///
-    /// # Sanctions provider contract interface
-    /// The configured contract **must** expose an entrypoint with this shape:
-    /// ```text
-    /// fn is_verified(env: Env, address: Address) -> bool
-    /// ```
-    /// returning `true` only for addresses that clear the provider's sanctions screening. Any
-    /// other return type, a panic, or a missing entrypoint causes this call (and therefore the
-    /// caller's entrypoint) to fail.
-    fn check_sanctions(env: &Env, addr: &Address) {
-        let provider: Option<Address> = env.storage().instance().get(&DataKey::SanctionsProvider);
-        if let Some(provider) = provider {
-            let args = soroban_sdk::vec![env, addr.to_val()];
-            let cleared: bool =
-                env.invoke_contract(&provider, &Symbol::new(env, "is_verified"), args);
-            ensure(env, cleared, EscrowError::SanctionsScreeningFailed);
-        }
-    }
-
-    /// Publishes `diagnostic` as an [`ErrorDiagnosticEmitted`] event.
-    fn emit_error_diagnostic(env: &Env, diagnostic: ErrorDiagnostic) {
-        ErrorDiagnosticEmitted {
-            name: symbol_short!("err_diag"),
-            error_code: diagnostic.error_code,
-            message: diagnostic.message,
-            recovery_action: diagnostic.recovery_action,
-            context: diagnostic.context,
-        }
-        .publish(env);
-    }
-
-    // --- Tiered admin roles (see #153) ---
-
-    /// Validates and stores an admin role list into [`DataKey::AdminRoles`]. Used by both
-    /// [`LiquifactEscrow::init`] and [`LiquifactEscrow::set_admin_roles`].
-    fn store_admin_roles(env: &Env, roles: &Vec<(Address, AdminRole)>) {
-        ensure(env, !roles.is_empty(), EscrowError::InvalidAdminRoleList);
-        ensure(
-            env,
-            (roles.len() as u32) <= MAX_ADMIN_ROLES,
-            EscrowError::InvalidAdminRoleList,
-        );
-        let mut map: Map<Address, AdminRole> = Map::new(env);
-        for i in 0..roles.len() {
-            let (addr, role) = roles.get(i).unwrap();
-            ensure(
-                env,
-                !map.contains_key(addr.clone()),
-                EscrowError::InvalidAdminRoleList,
-            );
-            map.set(addr, role);
-        }
-        env.storage().instance().set(&DataKey::AdminRoles, &map);
-    }
-
-    /// Resolves `addr`'s effective [`AdminRole`]: an explicit [`DataKey::AdminRoles`] entry if
-    /// present, else implicit [`AdminRole::Full`] when `addr == escrow.admin` (backward-compatible
-    /// default for deployments that never configured tiered roles), else [`None`].
-    fn effective_admin_role(
-        env: &Env,
-        escrow: &InvoiceEscrow,
-        addr: &Address,
-    ) -> Option<AdminRole> {
-        let roles: Option<Map<Address, AdminRole>> =
-            env.storage().instance().get(&DataKey::AdminRoles);
-        if let Some(roles) = roles {
-            if let Some(role) = roles.get(addr.clone()) {
-                return Some(role);
-            }
-        }
-        if addr == &escrow.admin {
-            Some(AdminRole::Full)
-        } else {
-            None
-        }
-    }
-
-    /// Requires `caller` to authorize and hold at least `min_role` (see the capabilities matrix
-    /// on [`AdminRole`]).
-    fn require_admin_role(
-        env: &Env,
-        escrow: &InvoiceEscrow,
-        caller: &Address,
-        min_role: AdminRole,
-    ) {
-        caller.require_auth();
-        let role = Self::effective_admin_role(env, escrow, caller)
-            .unwrap_or_else(|| fail(env, EscrowError::InsufficientAdminRole));
-        ensure(
-            env,
-            role.level() >= min_role.level(),
-            EscrowError::InsufficientAdminRole,
-        );
-    }
-
-    /// Returns `addr`'s effective [`AdminRole`], or [`None`] if it holds no configured role and
-    /// is not the escrow's [`InvoiceEscrow::admin`].
-    pub fn get_admin_role(env: Env, addr: Address) -> Option<AdminRole> {
-        let escrow = Self::get_escrow(env.clone());
-        Self::effective_admin_role(&env, &escrow, &addr)
-    }
-
-    /// Replaces the configured [`DataKey::AdminRoles`] table.
-    ///
-    /// # Authorization
-    /// Full-admin gated: requires the current effective [`AdminRole::Full`] holder (the
-    /// [`InvoiceEscrow::admin`] by default, or any address already promoted to `Full` in the
-    /// existing table).
-    ///
-    /// # Errors
-    /// - [`EscrowError::InvalidAdminRoleList`] if `roles` is empty, exceeds [`MAX_ADMIN_ROLES`],
-    ///   or contains a duplicate address.
-    /// - Standard uninitialized check via `load_escrow_require_admin`.
-    pub fn set_admin_roles(env: Env, roles: Vec<(Address, AdminRole)>) {
-        Self::load_escrow_require_admin(&env);
-        Self::store_admin_roles(&env, &roles);
-    }
-
-    /// Configures (or clears, via [`None`]) the [`DataKey::SanctionsProvider`] contract consulted
-    /// by [`LiquifactEscrow::check_sanctions`] before permitting an investor or SME address to
-    /// act. See [`LiquifactEscrow::check_sanctions`] for the required provider interface.
-    ///
-    /// # Authorization
-    /// Full-admin gated (see [`LiquifactEscrow::load_escrow_require_admin`]).
-    pub fn set_sanctions_provider(env: Env, provider: Option<Address>) {
-        Self::load_escrow_require_admin(&env);
-        match provider {
-            Some(ref p) => env.storage().instance().set(&DataKey::SanctionsProvider, p),
-            None => env.storage().instance().remove(&DataKey::SanctionsProvider),
-        }
-    }
-
-    /// Configures the [`MultisigPolicy`] gating critical operations, stored at
-    /// [`DataKey::MultisigPolicy`]. Operations not listed continue to require only the single
-    /// [`InvoiceEscrow::admin`] signature ("fallback to single admin if no policy set").
-    ///
-    /// Currently checked by [`LiquifactEscrow::set_legal_hold_multisig`] (operation
-    /// `"legal_hold"`) and [`LiquifactEscrow::release_large_claim_multisig`] (operation
-    /// `"large_claim"`).
-    ///
-    /// # Authorization
-    /// Full-admin gated (see [`LiquifactEscrow::load_escrow_require_admin`]).
-    ///
-    /// # Errors
-    /// - [`EscrowError::MultisigOperationsListEmpty`] if `operations` is empty or exceeds
-    ///   [`MAX_MULTISIG_OPERATIONS`].
-    /// - [`EscrowError::MultisigSignerListInvalid`] if `signers` is empty, exceeds
-    ///   [`MAX_MULTISIG_SIGNERS`], or contains a duplicate address.
-    /// - [`EscrowError::MultisigThresholdInvalid`] if `threshold` is zero or exceeds
-    ///   `signers.len()`.
-    pub fn init_multisig_policy(
-        env: Env,
-        operations: Vec<Symbol>,
-        signers: Vec<Address>,
-        threshold: u32,
-    ) {
-        Self::load_escrow_require_admin(&env);
-
-        ensure(
-            &env,
-            !operations.is_empty() && (operations.len() as u32) <= MAX_MULTISIG_OPERATIONS,
-            EscrowError::MultisigOperationsListEmpty,
-        );
-
-        ensure(
-            &env,
-            !signers.is_empty() && (signers.len() as u32) <= MAX_MULTISIG_SIGNERS,
-            EscrowError::MultisigSignerListInvalid,
-        );
-        for i in 0..signers.len() {
-            for j in (i + 1)..signers.len() {
-                ensure(
-                    &env,
-                    signers.get(i).unwrap() != signers.get(j).unwrap(),
-                    EscrowError::MultisigSignerListInvalid,
-                );
-            }
-        }
-
-        ensure(
-            &env,
-            threshold > 0 && threshold <= signers.len() as u32,
-            EscrowError::MultisigThresholdInvalid,
-        );
-
-        let policy = MultisigPolicy {
-            operations,
-            signers,
-            threshold,
-        };
-        env.storage()
-            .instance()
-            .set(&DataKey::MultisigPolicy, &policy);
-    }
-
-    /// Checks `operation` against the configured [`MultisigPolicy`] (if any). When a policy
-    /// covers `operation`, verifies `signers` are distinct, all members of
-    /// [`MultisigPolicy::signers`], meet [`MultisigPolicy::threshold`], and requires each
-    /// signer's authorization. When no policy is configured, or the policy does not cover
-    /// `operation`, falls back to requiring the single [`InvoiceEscrow::admin`] signature.
-    ///
-    /// # Errors
-    /// - [`EscrowError::MultisigSignerNotAuthorized`] if a signer is not a policy member or is
-    ///   listed more than once.
-    /// - [`EscrowError::MultisigInsufficientSigners`] if fewer distinct signers than
-    ///   [`MultisigPolicy::threshold`] are provided.
-    fn require_multisig_or_admin(
-        env: &Env,
-        escrow: &InvoiceEscrow,
-        operation: Symbol,
-        signers: Vec<Address>,
-    ) {
-        let policy: Option<MultisigPolicy> = env.storage().instance().get(&DataKey::MultisigPolicy);
-
-        let covered = policy.as_ref().is_some_and(|p| {
-            let mut found = false;
-            for i in 0..p.operations.len() {
-                if p.operations.get(i).unwrap() == operation {
-                    found = true;
-                    break;
-                }
-            }
-            found
-        });
-
-        if !covered {
-            escrow.admin.require_auth();
-            return;
-        }
-
-        let policy = policy.unwrap();
-        ensure(
-            env,
-            (signers.len() as u32) >= policy.threshold,
-            EscrowError::MultisigInsufficientSigners,
-        );
-
-        let mut seen: Vec<Address> = Vec::new(env);
-        for i in 0..signers.len() {
-            let signer = signers.get(i).unwrap();
-            let mut is_member = false;
-            for j in 0..policy.signers.len() {
-                if policy.signers.get(j).unwrap() == signer {
-                    is_member = true;
-                    break;
-                }
-            }
-            ensure(env, is_member, EscrowError::MultisigSignerNotAuthorized);
-            for j in 0..seen.len() {
-                ensure(
-                    env,
-                    seen.get(j).unwrap() != signer,
-                    EscrowError::MultisigSignerNotAuthorized,
-                );
-            }
-            signer.require_auth();
-            seen.push_back(signer);
-        }
-    }
-
-    /// Multisig-gated variant of [`LiquifactEscrow::set_legal_hold`] for operators using
-    /// [`LiquifactEscrow::init_multisig_policy`] to require multiple co-signers for legal hold
-    /// changes. Checks operation tag `"legal_hold"`; falls back to the single
-    /// [`InvoiceEscrow::admin`] signature when no policy covers it. Immediate activation is
-    /// rejected if a guardian is configured. Applies the same two-phase clear-delay gate as
-    /// [`LiquifactEscrow::set_legal_hold`].
-    pub fn set_legal_hold_multisig(env: Env, signers: Vec<Address>, active: bool, reason: String) {
-        let escrow = Self::get_escrow(env.clone());
-        Self::require_multisig_or_admin(
-            &env,
-            &escrow,
-            Symbol::new(&env, "legal_hold"),
-            signers.clone(),
-        );
-
-        if active && escrow.guardian.is_some() {
-            fail(&env, EscrowError::LegalHoldRequiresGuardianConfirmation);
-        }
-
-        if !active && Self::legal_hold_active(&env) {
-            let delay = Self::get_legal_hold_clear_delay(env.clone());
-            if delay > 0 {
-                let clearable_at: Option<u64> =
-                    env.storage().instance().get(&DataKey::LegalHoldClearableAt);
-                ensure(
-                    &env,
-                    clearable_at.is_some(),
-                    EscrowError::LegalHoldClearRequestMissing,
-                );
-                let now = env.ledger().timestamp();
-                ensure(
-                    &env,
-                    now >= clearable_at.unwrap(),
-                    EscrowError::LegalHoldClearNotReady,
-                );
-            }
-        }
-
-        env.storage()
-            .instance()
-            .remove(&DataKey::LegalHoldClearableAt);
-        env.storage()
-            .instance()
-            .remove(&DataKey::LegalHoldProposalExpiresAt);
-        env.storage().instance().set(&DataKey::LegalHold, &active);
-
-        LegalHoldChangedMultisig {
-            name: symbol_short!("lh_ms"),
-            invoice_id: escrow.invoice_id.clone(),
-            active: if active { 1 } else { 0 },
-            reason,
-            signer_count: signers.len(),
-        }
-        .publish(&env);
-    }
-
-    /// Multisig-gated release of `investor`'s settlement payout, for large claims that
-    /// operators want to require multiple co-signers for (see
-    /// [`LiquifactEscrow::init_multisig_policy`]). Checks operation tag `"large_claim"`; falls
-    /// back to the single [`InvoiceEscrow::admin`] signature when no policy covers it. Performs
-    /// the same idempotency and funding-history bookkeeping as
-    /// [`LiquifactEscrow::claim_investor_payout`], on `investor`'s behalf, and returns the
-    /// computed payout.
-    pub fn release_large_claim_multisig(
-        env: Env,
-        signers: Vec<Address>,
-        investor: Address,
-    ) -> i128 {
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksInvestorClaims,
-        );
-        ensure(
-            &env,
-            !Self::is_dispute_paused_for_mutation(&env),
-            EscrowError::DisputePausedBlocksInvestorClaims,
-        );
-
-        let escrow = Self::get_escrow(env.clone());
-        Self::require_multisig_or_admin(&env, &escrow, Symbol::new(&env, "large_claim"), signers);
-
-        let contribution: i128 = Self::get_persistent_investor_contribution(&env, investor.clone());
-        ensure(&env, contribution > 0, EscrowError::NoContributionToClaim);
-
-        let settled_amount: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::SettledAmount)
-            .unwrap_or(0);
-        let is_claimable = escrow.status == 2 || (escrow.status == 1 && settled_amount > 0);
-        ensure(&env, is_claimable, EscrowError::InvestorClaimNotSettled);
-
-        if Self::get_persistent_investor_claimed(&env, investor.clone()) {
-            return Self::compute_investor_payout(env.clone(), investor.clone());
-        }
-
-        Self::set_persistent_investor_claimed(&env, investor.clone(), true);
-
-        let payout = Self::compute_investor_payout(env.clone(), investor.clone());
-        Self::append_investor_history_record(
-            &env,
-            investor.clone(),
-            symbol_short!("settle"),
-            payout,
-            contribution,
-        );
-
-        InvestorPayoutClaimed {
-            name: symbol_short!("inv_claim"),
-            investor,
-            invoice_id: escrow.invoice_id.clone(),
-        }
-        .publish(&env);
-
-        payout
+        env.per_investor().set_yield_claim_delegate_revoked(investor, revoked);
     }
 
     /// Verify that a delegation is valid (exists and is not revoked).
@@ -5085,9 +4712,7 @@ impl LiquifactEscrow {
     /// Add or remove an investor from the allowlist.
     pub fn set_investor_allowlisted(env: Env, investor: Address, allowed: bool) {
         let escrow = Self::load_escrow_require_admin(&env);
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorAllowlisted(investor.clone()), &allowed);
+        Self::set_persistent_investor_allowlisted(&env, investor.clone(), allowed);
 
         InvestorAllowlistChanged {
             name: symbol_short!("al_set"),
@@ -5124,9 +4749,7 @@ impl LiquifactEscrow {
         // Iterate and perform per-address persistent storage write and event emission.
         for i in 0..n {
             let inv = investors.get(i).unwrap();
-            env.storage()
-                .persistent()
-                .set(&DataKey::InvestorAllowlisted(inv.clone()), &allowed);
+            Self::set_persistent_investor_allowlisted(&env, inv.clone(), allowed);
 
             InvestorAllowlistChanged {
                 name: symbol_short!("al_set"),
@@ -5139,10 +4762,7 @@ impl LiquifactEscrow {
     }
 
     pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool {
-        env.storage()
-            .persistent()
-            .get(&DataKey::InvestorAllowlisted(investor))
-            .unwrap_or(false)
+        Self::get_persistent_investor_allowlisted(&env, investor)
     }
 
     /// Convenience alias for [`LiquifactEscrow::set_legal_hold`] with `active = false`.
