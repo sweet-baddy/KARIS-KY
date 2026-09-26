@@ -352,10 +352,7 @@ fn attestation_append_respects_max_entries() {
 
     // Verify order.
     for i in 0u32..MAX_ATTESTATION_APPEND_ENTRIES {
-        assert_eq!(
-            log.get(i).unwrap(),
-            digest(&env, i as u8)
-        );
+        assert_eq!(log.get(i).unwrap(), digest(&env, i as u8));
     }
 }
 

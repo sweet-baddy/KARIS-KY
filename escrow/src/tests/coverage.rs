@@ -3,8 +3,8 @@ use super::{
     SCHEMA_VERSION,
 };
 use crate::{
-    CollateralCommitmentSnapshot, DataKey, EscrowCloseSnapshot, EscrowError, EscrowHealthMetrics,
-    YieldTier, FundReceived, AdminChanged, LegalHoldSet, EscrowPaused,
+    AdminChanged, CollateralCommitmentSnapshot, DataKey, EscrowCloseSnapshot, EscrowError,
+    EscrowHealthMetrics, EscrowPaused, FundReceived, LegalHoldSet, YieldTier,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -108,11 +108,11 @@ fn typed_error_codes_cover_allowlist_attestation_and_dust_guards() {
         EscrowError::InvestorNotAllowlisted,
     );
 
-    let digest = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
+    let digest = soroban_sdk::Bytes::from_array(&env, &[1u8; 32]);
     client.bind_primary_attestation_hash(&digest);
     assert_contract_error(
         client.try_bind_primary_attestation_hash(&digest),
-        EscrowError::PrimaryAttestationAlreadyBound,
+        EscrowError::AttestationHashAlreadyBound,
     );
 
     assert_contract_error(
@@ -159,6 +159,7 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::SweepExceedsLiabilityFloor, 42),
         (EscrowError::PrimaryAttestationAlreadyBound, 50),
         (EscrowError::AttestationAppendLogCapacityReached, 51),
+        (EscrowError::AttestationHashAlreadyBound, 53),
         (EscrowError::CollateralAmountNotPositive, 60),
         (EscrowError::CollateralAssetEmpty, 61),
         (EscrowError::CollateralTimestampBackwards, 62),
@@ -404,13 +405,15 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
     );
     let digest = BytesN::from_array(&env, &[1u8; 32]);
-    attest_client.bind_primary_attestation_hash(&digest);
+    attest_client.bind_primary_attestation_hash(&soroban_sdk::Bytes::from_array(&env, &[1u8; 32]));
     assert_contract_error(
-        attest_client.try_bind_primary_attestation_hash(&digest),
+        attest_client
+            .try_bind_primary_attestation_hash(&soroban_sdk::Bytes::from_array(&env, &[1u8; 32])),
         EscrowError::PrimaryAttestationAlreadyBound,
     );
     for i in 0u8..MAX_ATTESTATION_APPEND_ENTRIES as u8 {
-        attest_client.append_attestation_digest(&symbol_short!(""), &BytesN::from_array(&env, &[i; 32]));
+        attest_client
+            .append_attestation_digest(&symbol_short!(""), &BytesN::from_array(&env, &[i; 32]));
     }
     assert_contract_error(
         attest_client.try_append_attestation_digest(&BytesN::from_array(&env, &[0xFF; 32])),
@@ -440,14 +443,26 @@ fn typed_error_codes_cover_range_boundaries() {
     );
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
     assert_contract_error(
-        collat_client.try_record_sme_collateral_commitment(&asset, &0),
+        collat_client.try_record_sme_collateral_commitment(
+            &asset,
+            &0,
+            &soroban_sdk::String::from_str(&env, "bullion"),
+        ),
         EscrowError::CollateralAmountNotPositive,
     );
-    collat_client.record_sme_collateral_commitment(&asset, &100);
+    collat_client.record_sme_collateral_commitment(
+        &asset,
+        &100,
+        &soroban_sdk::String::from_str(&env, "bullion"),
+    );
     env.ledger()
         .set_timestamp(env.ledger().timestamp().saturating_sub(1));
     assert_contract_error(
-        collat_client.try_record_sme_collateral_commitment(&asset, &200),
+        collat_client.try_record_sme_collateral_commitment(
+            &asset,
+            &200,
+            &soroban_sdk::String::from_str(&env, "bullion"),
+        ),
         EscrowError::CollateralTimestampBackwards,
     );
 
@@ -1107,7 +1122,7 @@ fn test_all_getters() {
     assert_eq!(client.get_funding_token(), funding_token);
     assert_eq!(client.get_treasury(), treasury);
     assert_eq!(client.get_registry_ref(), Some(registry));
-    assert_eq!(client.get_version(), 7);
+    assert_eq!(client.get_version(), SCHEMA_VERSION);
     assert!(!client.get_legal_hold());
     assert_eq!(client.get_min_contribution_floor(), 10);
     assert_eq!(client.get_max_unique_investors_cap(), Some(5));
@@ -1143,11 +1158,14 @@ fn test_attestations_happy_path() {
         &None,
     );
 
-    let hash1 = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
+    let hash1 = soroban_sdk::Bytes::from_array(&env, &[1u8; 32]);
     let hash2 = soroban_sdk::BytesN::from_array(&env, &[2u8; 32]);
 
     client.bind_primary_attestation_hash(&hash1);
-    assert_eq!(client.get_primary_attestation_hash(), Some(hash1.clone()));
+    assert_eq!(
+        client.get_primary_attestation_hash(),
+        Some(soroban_sdk::BytesN::from_array(&env, &[1u8; 32]))
+    );
 
     client.append_attestation_digest(&symbol_short!(""), &hash2);
     let log = client.get_attestation_append_log();
@@ -1182,7 +1200,7 @@ fn test_bind_primary_attestation_twice() {
         &None,
     );
 
-    let hash = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
+    let hash = soroban_sdk::Bytes::from_array(&env, &[1u8; 32]);
     client.bind_primary_attestation_hash(&hash);
     client.bind_primary_attestation_hash(&hash);
 }
@@ -1291,6 +1309,85 @@ fn test_sweep_terminal_dust_happy_path() {
 }
 
 #[test]
+fn test_sweep_terminal_dust_handles_one_unit_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let token = crate::tests::install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T1"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&Address::generate(&env), &100);
+    env.ledger().with_mut(|li| li.timestamp = 200);
+    client.settle();
+
+    token.stellar.mint(&client.address, &1);
+
+    let swept = client.sweep_terminal_dust(&1);
+    assert_eq!(swept, 1);
+    assert_eq!(token.token.balance(&treasury), 1);
+}
+
+#[test]
+fn test_sweep_terminal_dust_handles_sub_cap_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let token = crate::tests::install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let dust_amount = MAX_DUST_SWEEP_AMOUNT - 1;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T2"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&Address::generate(&env), &100);
+    env.ledger().with_mut(|li| li.timestamp = 200);
+    client.settle();
+
+    token.stellar.mint(&client.address, &dust_amount);
+
+    let swept = client.sweep_terminal_dust(&dust_amount);
+    assert_eq!(swept, dust_amount);
+    assert_eq!(token.token.balance(&treasury), dust_amount);
+}
+
+#[test]
 fn test_bump_ttl_covers_persistent_investor_keys() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1325,6 +1422,77 @@ fn test_bump_ttl_covers_persistent_investor_keys() {
     let mut investors = SorobanVec::new(&env);
     investors.push_back(investor);
     client.bump_ttl(&investors);
+}
+
+#[test]
+fn test_bump_ttl_accepts_empty_batch_instance_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL002"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // An empty `allowlisted` vector is valid: it still extends the instance TTL,
+    // it just skips the per-investor persistent-key loop.
+    let empty: SorobanVec<Address> = SorobanVec::new(&env);
+    client.bump_ttl(&empty);
+}
+
+#[test]
+fn test_bump_ttl_rejects_batch_over_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL003"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let mut too_many: SorobanVec<Address> = SorobanVec::new(&env);
+    for _ in 0..=crate::MAX_TTL_BUMP_BATCH {
+        too_many.push_back(Address::generate(&env));
+    }
+
+    assert_contract_error(
+        client.try_bump_ttl(&too_many),
+        EscrowError::TtlBumpBatchTooLarge,
+    );
 }
 
 #[test]
@@ -1561,9 +1729,17 @@ fn test_sme_collateral_commitment() {
     );
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
-    let commitment = client.record_sme_collateral_commitment(&asset, &5000);
+    let commitment = client.record_sme_collateral_commitment(
+        &asset,
+        &5000,
+        &soroban_sdk::String::from_str(&env, "gold_bullion"),
+    );
     assert_eq!(commitment.amount, 5000);
     assert_eq!(commitment.asset, asset);
+    assert_eq!(
+        commitment.collateral_type,
+        soroban_sdk::String::from_str(&env, "gold_bullion")
+    );
 
     let stored = client.get_sme_collateral_commitment().unwrap();
     assert_eq!(stored.amount, 5000);
@@ -1596,7 +1772,11 @@ fn test_sme_collateral_empty_asset_rejected() {
         &None,
     );
     let empty_asset = soroban_sdk::Symbol::new(&env, "");
-    client.record_sme_collateral_commitment(&empty_asset, &5000);
+    client.record_sme_collateral_commitment(
+        &empty_asset,
+        &5000,
+        &soroban_sdk::String::from_str(&env, "collateral"),
+    );
 }
 
 #[test]
@@ -1627,12 +1807,20 @@ fn test_sme_collateral_stale_timestamp_rejected() {
     );
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
-    client.record_sme_collateral_commitment(&asset, &5000);
+    client.record_sme_collateral_commitment(
+        &asset,
+        &5000,
+        &soroban_sdk::String::from_str(&env, "gold_bullion"),
+    );
 
     // Simulate stale replay: move ledger timestamp backward
     env.ledger().with_mut(|li| li.timestamp = 100);
 
-    client.record_sme_collateral_commitment(&asset, &7000);
+    client.record_sme_collateral_commitment(
+        &asset,
+        &7000,
+        &soroban_sdk::String::from_str(&env, "gold_bullion"),
+    );
 }
 
 #[test]
@@ -1662,15 +1850,26 @@ fn test_sme_collateral_replacement_preserves_prior_amount() {
     );
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
-    let first = client.record_sme_collateral_commitment(&asset, &5000);
+    let first = client.record_sme_collateral_commitment(
+        &asset,
+        &5000,
+        &soroban_sdk::String::from_str(&env, "gold_bullion"),
+    );
     assert_eq!(first.amount, 5000);
 
     // Advance timestamp so the replacement is not stale
     env.ledger().with_mut(|li| li.timestamp = 20000);
 
-    let second = client.record_sme_collateral_commitment(&asset, &7000);
+    let second = client.record_sme_collateral_commitment(
+        &asset,
+        &7000,
+        &soroban_sdk::String::from_str(&env, "gold_bullion"),
+    );
     assert_eq!(second.amount, 7000);
-    assert_eq!(second.recorded_at, 20000);
+    // recorded_at is preserved from the original write (setup sets timestamp=12345).
+    assert_eq!(second.recorded_at, 12345);
+    // updated_at reflects the most recent write timestamp.
+    assert_eq!(second.updated_at, 20000);
 
     let stored = client.get_sme_collateral_commitment().unwrap();
     assert_eq!(stored.amount, 7000);
@@ -2242,7 +2441,7 @@ fn test_get_escrow_summary_happy_path() {
     assert_eq!(summary.funding_close_snapshot, EscrowCloseSnapshot::None);
     assert_eq!(summary.unique_funder_count, 0);
     assert!(!summary.is_allowlist_active);
-    assert_eq!(summary.schema_version, 7);
+    assert_eq!(summary.schema_version, SCHEMA_VERSION);
     assert_eq!(
         summary.sme_collateral_commitment,
         CollateralCommitmentSnapshot::None
@@ -2375,7 +2574,11 @@ fn test_get_escrow_summary_with_collateral_and_attestations() {
 
     // Record SME collateral
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
-    client.record_sme_collateral_commitment(&asset, &5000);
+    client.record_sme_collateral_commitment(
+        &asset,
+        &5000,
+        &soroban_sdk::String::from_str(&env, "gold_bullion"),
+    );
 
     // Bind primary attestation hash
     let primary_hash = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
@@ -2473,24 +2676,28 @@ fn test_record_sme_collateral_commitment_semantics() {
     // 1. Happy path: Record first commitment
     let asset_sym = soroban_sdk::Symbol::new(&env, "USDC");
     let pledge_amount = 5_000i128;
+    let collateral_type = soroban_sdk::String::from_str(&env, "equipment");
 
     // Set ledger timestamp to a known value
     let mut ledger_info = env.ledger().get();
     ledger_info.timestamp = 10000;
     env.ledger().set(ledger_info);
 
-    let commitment = client.record_sme_collateral_commitment(&asset_sym, &pledge_amount);
+    let commitment =
+        client.record_sme_collateral_commitment(&asset_sym, &pledge_amount, &collateral_type);
 
     // Assert that the returned commitment is correct
     assert_eq!(commitment.asset, asset_sym);
     assert_eq!(commitment.amount, pledge_amount);
     assert_eq!(commitment.recorded_at, 10000);
+    assert_eq!(commitment.collateral_type, collateral_type);
 
     // Assert that the stored commitment matches
     let stored = client.get_sme_collateral_commitment().unwrap();
     assert_eq!(stored.asset, asset_sym);
     assert_eq!(stored.amount, pledge_amount);
     assert_eq!(stored.recorded_at, 10000);
+    assert_eq!(stored.collateral_type, collateral_type);
 
     // CRITICAL SECURITY ASSERTION: Assert that NO token balances changed!
     assert_eq!(token.token.balance(&sme), sme_bal_before);
@@ -2503,16 +2710,19 @@ fn test_record_sme_collateral_commitment_semantics() {
     ledger_info.timestamp = 12000;
     env.ledger().set(ledger_info);
 
-    let replacement = client.record_sme_collateral_commitment(&asset_sym, &new_pledge_amount);
+    let replacement =
+        client.record_sme_collateral_commitment(&asset_sym, &new_pledge_amount, &collateral_type);
 
     // Assert replacement details
     assert_eq!(replacement.asset, asset_sym);
     assert_eq!(replacement.amount, new_pledge_amount);
     assert_eq!(replacement.recorded_at, 12000);
+    assert_eq!(replacement.collateral_type, collateral_type);
 
     let stored_replacement = client.get_sme_collateral_commitment().unwrap();
     assert_eq!(stored_replacement.amount, new_pledge_amount);
     assert_eq!(stored_replacement.recorded_at, 12000);
+    assert_eq!(stored_replacement.collateral_type, collateral_type);
 
     // Token balances must still be completely unaffected
     assert_eq!(token.token.balance(&sme), sme_bal_before);
@@ -2525,7 +2735,7 @@ fn test_record_sme_collateral_commitment_semantics() {
     env.ledger().set(ledger_info);
 
     assert_contract_error(
-        client.try_record_sme_collateral_commitment(&asset_sym, &8_000i128),
+        client.try_record_sme_collateral_commitment(&asset_sym, &8_000i128, &collateral_type),
         EscrowError::CollateralTimestampBackwards,
     );
 
@@ -2536,18 +2746,18 @@ fn test_record_sme_collateral_commitment_semantics() {
 
     // 4. Error Case: Amount must be positive (0 or negative)
     assert_contract_error(
-        client.try_record_sme_collateral_commitment(&asset_sym, &0i128),
+        client.try_record_sme_collateral_commitment(&asset_sym, &0i128, &collateral_type),
         EscrowError::CollateralAmountNotPositive,
     );
     assert_contract_error(
-        client.try_record_sme_collateral_commitment(&asset_sym, &-100i128),
+        client.try_record_sme_collateral_commitment(&asset_sym, &-100i128, &collateral_type),
         EscrowError::CollateralAmountNotPositive,
     );
 
     // 5. Error Case: Asset symbol must be non-empty
     let empty_symbol = soroban_sdk::Symbol::new(&env, "");
     assert_contract_error(
-        client.try_record_sme_collateral_commitment(&empty_symbol, &5_000i128),
+        client.try_record_sme_collateral_commitment(&empty_symbol, &5_000i128, &collateral_type),
         EscrowError::CollateralAssetEmpty,
     );
 }

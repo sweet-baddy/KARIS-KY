@@ -488,17 +488,29 @@ fn test_full_version_upgrade_matrix() {
     // ===== v2 Features =====
     // v2 adds investor yield tracking.
     let inv1_yield_v2 = client.get_investor_yield_bps(&investor1);
-    assert_eq!(inv1_yield_v2, 800i64, "v2: investor should have effective yield");
+    assert_eq!(
+        inv1_yield_v2, 800i64,
+        "v2: investor should have effective yield"
+    );
 
     let inv1_lock_v2 = client.get_investor_claim_not_before(&investor1);
-    assert_eq!(inv1_lock_v2, 0u64, "v2: investor should have no lock by default");
+    assert_eq!(
+        inv1_lock_v2, 0u64,
+        "v2: investor should have no lock by default"
+    );
 
     // ===== v3 Features =====
     // v3 adds snapshot and unique funder count.
     let snapshot_v3 = client.get_funding_close_snapshot();
-    assert!(snapshot_v3.is_some(), "v3: escrow funded, snapshot should exist");
+    assert!(
+        snapshot_v3.is_some(),
+        "v3: escrow funded, snapshot should exist"
+    );
     let snap = snapshot_v3.expect("snap");
-    assert_eq!(snap.funded_amount, 500_000i128, "v3: snapshot captures funded amount");
+    assert_eq!(
+        snap.funded_amount, 500_000i128,
+        "v3: snapshot captures funded amount"
+    );
 
     let summary = client.get_summary();
     assert_eq!(
@@ -511,7 +523,11 @@ fn test_full_version_upgrade_matrix() {
     let digest = soroban_sdk::BytesN::<32>::from_array(&env, &[42; 32]);
     client.bind_primary_attestation_hash(digest.clone());
     let hash_v4 = client.get_primary_attestation_hash();
-    assert_eq!(hash_v4.expect("hash"), digest, "v4: primary attestation bound");
+    assert_eq!(
+        hash_v4.expect("hash"),
+        digest,
+        "v4: primary attestation bound"
+    );
 
     // ===== v5 Features (if re-inited with tiers) =====
     // v5 would add tiered yield via fund_with_commitment; current deployment already has it.
@@ -519,7 +535,10 @@ fn test_full_version_upgrade_matrix() {
     // ===== v6 Features =====
     // v6 uses persistent storage (transparent to tests but verified above).
     let contrib_v6 = client.get_contribution(&investor1);
-    assert_eq!(contrib_v6, 200_000i128, "v6: persistent storage holds contribution");
+    assert_eq!(
+        contrib_v6, 200_000i128,
+        "v6: persistent storage holds contribution"
+    );
 
     // ===== Settlement works end-to-end =====
     client.settle();

@@ -32,3 +32,6 @@ pr.md
 # per-developer secrets live in .env.<network>.local)
 .env.*.local
 .env.local
+
+.env.mainnet
+.env.staging

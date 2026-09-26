@@ -1,9 +1,11 @@
 # RFC-002: Yield Reinvestment
 
-**Status:** DISCUSSION  
+**Status:** IMPLEMENTED  
 **Author:** Product Team (@karis-ky)  
 **Date Proposed:** 2026-07-27  
 **Target Release:** v1.5 (Q4 2026)  
+
+This RFC is now implemented via the reinvestment lifecycle enforced by the escrow contract and is tracked as part of FEAT-004.
 **Related:** ADR-005 (Tiered Yield), Issue #892, RFC-003 (Registry Integration)
 
 ---

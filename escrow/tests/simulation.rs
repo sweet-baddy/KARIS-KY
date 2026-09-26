@@ -320,7 +320,10 @@ fn test_simulate_claim_valid_investor() {
     assert!(payout1 > 0, "investor1 should have positive payout");
     assert!(payout2 > 0, "investor2 should have positive payout");
     // Due to rounding, they should be equal or very close
-    assert!((payout1 - payout2).abs() <= 1, "equal investors should have equal payouts");
+    assert!(
+        (payout1 - payout2).abs() <= 1,
+        "equal investors should have equal payouts"
+    );
 }
 
 /// Test that simulate_claim works without investor auth.
@@ -431,6 +434,12 @@ fn test_simulate_does_not_affect_actual() {
     let state2 = client.get_escrow();
 
     // Verify actual fund changed the state
-    assert_eq!(state1.funded_amount, 0, "simulations should not change state");
-    assert_eq!(state2.funded_amount, amount, "actual fund should change state");
+    assert_eq!(
+        state1.funded_amount, 0,
+        "simulations should not change state"
+    );
+    assert_eq!(
+        state2.funded_amount, amount,
+        "actual fund should change state"
+    );
 }

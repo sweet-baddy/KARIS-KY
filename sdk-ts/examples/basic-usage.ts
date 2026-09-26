@@ -17,6 +17,7 @@ import {
   fromBaseUnits,
   type InvoiceEscrow,
   type InitParams,
+  type EscrowSnapshot,
   type SorobanRpcClient,
 } from "../src";
 
@@ -72,6 +73,48 @@ class MockRpcClient implements SorobanRpcClient {
         };
       case "get_legal_hold":
         return false;
+      case "export_state":
+        return {
+          escrow: this.state["escrow"] || {
+            invoice_id: "INV001",
+            admin: "GADMINXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+            sme_address: "GSMEXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+            amount: "100000000000",
+            funding_target: "100000000000",
+            funded_amount: "50000000000",
+            yield_bps: "800",
+            maturity: "0",
+            status: EscrowStatus.Funded,
+          },
+          schema_version: 6,
+          funding_token: "CTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+          treasury: "GTREAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+          registry: null,
+          yield_tiers: null,
+          funding_close_snapshot: {
+            total_principal: "50000000000",
+            funding_target: "100000000000",
+            closed_at_ledger_timestamp: String(this.ledger.timestamp),
+            closed_at_ledger_sequence: this.ledger.sequence,
+          },
+          min_contribution_floor: "0",
+          max_unique_investors_cap: null,
+          max_per_investor_cap: null,
+          unique_funder_count: 1,
+          legal_hold: false,
+          legal_hold_clear_delay: "0",
+          legal_hold_clearable_at: null,
+          allowlist_active: false,
+          primary_attestation_hash: null,
+          attestation_log: [],
+          collateral: null,
+          distributed_principal: "0",
+          funding_deadline: null,
+          pending_admin: null,
+          checksum: "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd",
+        } satisfies EscrowSnapshot;
+      case "import_state":
+        return null;
       default:
         return null;
     }
@@ -153,7 +196,16 @@ async function main() {
   console.log(`  Funded amount: ${fromBaseUnits(updatedEscrow.funded_amount)} tokens`);
   console.log(`  Status: ${ESCROW_STATUS_LABELS[updatedEscrow.status]}\n`);
 
-  // 7. Error classification demo
+  // 7. Export and import snapshot payloads
+  console.log("→ Exporting escrow state snapshot...");
+  const snapshot = await client.exportState();
+  console.log(`  Snapshot schema version: ${snapshot.schema_version}`);
+  console.log(`  Funding token: ${snapshot.funding_token}`);
+  console.log("→ Importing snapshot onto a fresh instance...");
+  await client.importState(snapshot);
+  console.log("  Snapshot import accepted by the mock RPC layer.\n");
+
+  // 8. Error classification demo
   console.log("→ Error code classification demo:");
   const testCodes = [3, 103, 122, 164];
   for (const code of testCodes) {

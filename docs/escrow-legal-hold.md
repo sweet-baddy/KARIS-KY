@@ -35,10 +35,19 @@ Operations that are **not** gated (read-only or metadata-only):
 ## Enforcement model
 
 ```
-set_legal_hold(active: bool)
-    └─ escrow.admin.require_auth()   ← Soroban auth check, cannot be spoofed
-    └─ storage().instance().set(DataKey::LegalHold, active)
-    └─ emits LegalHoldChanged { active: 1 | 0 }
+No guardian (legacy init)
+   └─ set_legal_hold(true, reason)
+     └─ escrow.admin.require_auth()
+     └─ stores LegalHold = true
+
+Guardian configured (init_with_guardian)
+   └─ propose_legal_hold(admin)
+     └─ current admin authorization
+     └─ stores proposal expiry = ledger timestamp + 3,600 seconds
+   └─ confirm_legal_hold(guardian)
+     └─ configured guardian authorization
+     └─ requires current timestamp < proposal expiry
+     └─ stores LegalHold = true
 
 request_clear_legal_hold()
     └─ escrow.admin.require_auth()
@@ -51,8 +60,16 @@ clear_legal_hold()
 
 Key properties:
 
-- **Single role.** Only `InvoiceEscrow::admin` can set or clear the hold. There
-  is no secondary "compliance officer" role or emergency bypass in this version.
+- **Activation roles.** Without a configured guardian, only the current admin
+  activates a hold in one step. With a guardian, activation requires a current
+  admin proposal and confirmation by the configured guardian. Both the legacy
+  `set_legal_hold(true, ...)` and `set_legal_hold_multisig(..., true, ...)`
+  immediate activation paths reject guardian-configured escrows.
+- **Proposal expiry.** A pending proposal is valid for less than one hour of
+  ledger time. The admin may replace a pending proposal; an expired proposal
+  cannot be confirmed.
+- **Clearance unchanged.** The current admin alone clears a hold, subject to
+  any configured clear delay. Guardian approval is not required for clearance.
 - **Atomic.** The hold is read and checked before any storage mutation in each
   gated function. There is no window between the check and the effect.
 - **Persistent across state transitions.** The hold is stored independently of
@@ -61,9 +78,10 @@ Key properties:
 - **Controlled-clear semantics.** When a hold-clear delay is configured,
   `request_clear_legal_hold` must be called first and `set_legal_hold(false)` is
   only allowed once the ledger timestamp has reached the returned boundary.
-- **Idempotent.** Calling `set_legal_hold(true)` when already `true` (or
-  `false` when already `false`) is a no-op for state but still requires admin
-  auth and emits an event.
+- **Idempotent.** In legacy mode, repeated `set_legal_hold` calls are no-ops
+  for state but still require admin auth and emit an event. In guardian mode,
+  activation requires a fresh proposal and confirmation; repeated confirmation
+  without a pending proposal is rejected. Clearing remains admin-authorized.
 - **Default off.** `legal_hold_active` returns `false` when the key has never
   been written, so newly deployed escrows are not accidentally frozen.
 
@@ -71,9 +89,10 @@ Key properties:
 
 ## Governance expectations
 
-This contract does **not** embed a timelock, council multisig, or on-chain
-governance vote for hold operations. Production deployments must treat `admin`
-as a governed address:
+The optional guardian reduces the risk of a compromised admin key causing an
+immediate freeze, but it is not a replacement for governance. Production
+deployments must treat `admin` as a governed address and protect the guardian
+key independently:
 
 - **Multisig wallet** (e.g. Stellar multisig account with M-of-N signers) so
   no single key can freeze funds indefinitely.
@@ -89,14 +108,16 @@ as a governed address:
   the clear request has been made and the ledger time has reached the stored
   `LegalHoldClearableAt` value.
 
-Without one of the above, a single compromised admin key can freeze all
-investor funds with no on-chain recourse.
+Without a guardian, a compromised admin key can freeze all investor funds
+immediately. With a guardian, compromise of both independent keys is required
+for immediate activation. A hold already active remains clearable by the admin.
 
 ### Required deployment posture
 
 | Requirement | Rationale |
 |---|---|
-| Governed `admin` at `init` (multisig or DAO contract) | Single EOA admin + hold + key loss = indefinite fund lock |
+| Governed `admin` at `init` (multisig or DAO contract) | Limits freeze and recovery risk |
+| Independent guardian key when configured | Prevents admin-only immediate hold activation |
 | Documented recovery playbook | Operators must know how to execute `propose_admin` and `accept_admin` under hold |
 | Testnet rotation drill before mainnet | Confirms new admin can `clear_legal_hold` after rotation |
 | Indexer monitoring of `LegalHoldChanged` | Detect holds that exceed policy duration |
@@ -115,8 +136,8 @@ lost or destroyed:
   `sweep_terminal_dust` remain blocked.
 - `clear_legal_hold` requires authorization from whoever is stored as
   `InvoiceEscrow::admin` — the lost key cannot satisfy this.
-- There is **no** timelock expiry, guardian, or protocol-level bypass in this
-  contract version.
+- There is no protocol-level bypass. A configured guardian participates only
+  in hold activation; it cannot recover a lost admin key or clear an active hold.
 
 **On-chain recovery (only path):**
 
@@ -158,6 +179,7 @@ acceptance the new admin inherits the hold state and must explicitly call
 |---|---|
 | Timelock on hold duration | Out of scope — enforce off-chain |
 | Multi-party approval to set hold | Out of scope — use a governed `admin` |
+| Two-step approval to clear hold | Out of scope — clearance remains admin-only |
 | Automatic hold expiry | Out of scope |
 | Hold on non-risk-bearing reads | Out of scope — reads are always safe |
 | Fee-on-transfer or rebasing tokens | Out of scope — unsupported by design |
@@ -182,3 +204,26 @@ The matrix in `escrow/src/tests/legal_hold.rs` covers:
 10. Non-gated ops (`update_maturity`, `propose_admin`, `accept_admin`, getters) are not blocked.
 11. Claim idempotency survives a hold toggle.
 12. Single hold toggle blocks all gated entrypoints in separate escrows.
+13. Legacy initialization retains one-step activation; guardian initialization requires proposal and confirmation.
+14. Guardian confirmation rejects expired proposals and immediate-activation bypasses.
+
+## Deployment compatibility
+
+`InvoiceEscrow` now stores an optional guardian, changing its XDR layout and
+advancing the schema to version 8. Existing instances cannot be upgraded in
+place with the current migration implementation; deploy a new instance to use
+guardian protection. Existing `init` callers remain compatible and configure
+no guardian. Use `init_with_guardian` to bind the guardian at initialization.
+
+---
+
+## Interaction with dispute pause
+
+Legal hold and dispute pause are two independent risk-control overlays that can
+be active simultaneously on the same escrow. Both block overlapping
+risk-bearing operations.
+
+See [`docs/OPERATOR_RUNBOOK.md`](OPERATOR_RUNBOOK.md) **§8. Interaction
+Matrix: Legal Hold vs. Dispute Pause** for the full operation matrix,
+precedence rules, and examples of managing both controls during operational or
+compliance events.

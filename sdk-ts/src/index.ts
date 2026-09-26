@@ -4,8 +4,11 @@
 
 export {
   EscrowClient,
+  ValidationError,
   type EscrowClientConfig,
   type SorobanRpcClient,
+  type SorobanEventFilter,
+  type SorobanEventQuery,
 } from "./client";
 
 export {
@@ -30,8 +33,15 @@ export {
   type FundingCloseSnapshot,
   type SmeCollateralCommitment,
   type EscrowSummary,
+  type InvestorCapStatus,
+  type EscrowSnapshot,
   type ErrorDiagnostic,
   type EscrowTemplate,
   type InitParams,
+  type AdminRole,
   type SorobanResult,
+  type AttestationBoundEvt,
+  type EscrowEvent,
+  type SorobanEventPage,
+  type EscrowEventSubscriptionOptions,
 } from "./types";

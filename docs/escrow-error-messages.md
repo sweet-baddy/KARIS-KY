@@ -4,6 +4,8 @@ karis-ky escrow emits typed Soroban contract errors through [`EscrowError`](../e
 Client SDKs **must branch on the numeric `ContractError(code)` value**, not on panic strings or
 diagnostic text.
 
+**TypeScript SDK Users:** See [`sdk-ts/docs/error-handling.md`](../sdk-ts/docs/error-handling.md) for SDK-specific error handling patterns, try/catch examples, and integration guidance.
+
 ## Stability Policy
 
 Error codes are **append-only**. Once a code is assigned:
@@ -28,7 +30,7 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Init / pricing | 1–13 | Initialization, invoice id, yield tiers, optional caps | 1, 13 |
 | Uninitialized metadata | 20–22 | Escrow or required addresses not configured | 20, 22 |
 | Dust sweep + SEP-41 safety | 30–42 | Terminal dust sweep and token transfer invariants | 30, 42 |
-| Attestation | 50–51 | Primary hash binding and append-only digest log | 50, 51 |
+| Attestation | 50–53 | Primary hash binding and append-only digest log | 50, 53 |
 | SME collateral | 60–62 | Off-chain collateral metadata record | 60, 62 |
 | Admin validation | 70–80 | Allowlist batch, funding target, investor cap, maturity, admin handover | 70, 80 |
 | Schema migration | 90–92 | `migrate` version checks | 90, 92 |
@@ -36,10 +38,11 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Funding batch | 82–83 | [`fund_batch`] entry count bounds | 82, 83 |
 | Settlement / payout | 120–129 | Settle, withdraw, investor claims, payout math | 120, 129 |
 | Cancel / refund | 140–143 | Cancel funding and investor refunds | 140, 143 |
-| Legal-hold clear (two-phase) | 150–152 | Delayed compliance-hold lift workflow | 150, 152 |
+| Legal-hold operations | 150–154 | Delayed compliance-hold lift workflow, terminal state guard | 150, 154 |
 | Beneficiary rotation | 160–162 | Governed SME address rotation | 160, 162 |
 | Admin handover / funding deadline | 163–164 | `accept_admin` and post-deadline funding | 163, 164 |
 | Clone escrow | 170–171 | Clone settled escrow to create new instances | 170, 171 |
+| State export / import | 200–203 | Disaster recovery and network migration state snapshot and restore | 200, 203 |
 
 See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 [`docs/ESCROW_BENEFICIARY_ROTATION.md`](ESCROW_BENEFICIARY_ROTATION.md),
@@ -80,8 +83,10 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 40 | `SenderBalanceDeltaMismatch` | `transfer_funding_token_with_balance_checks` | sender spent `!= amount` | Token fee/hook detected; use allowlisted token | typed |
 | 41 | `RecipientBalanceDeltaMismatch` | `transfer_funding_token_with_balance_checks` | recipient received `!= amount` | Token fee/hook detected; use allowlisted token | typed |
 | 42 | `SweepExceedsLiabilityFloor` | `sweep_terminal_dust` | `balance - sweep_amt < funded_amount - distributed_principal` | Reduce sweep; wait until liabilities refunded | typed |
-| 50 | `PrimaryAttestationAlreadyBound` | `bind_primary_attestation_hash` | primary hash already stored | Use `append_attestation_digest` for updates | typed |
+| 50 | `PrimaryAttestationAlreadyBound` | legacy mapping | Previously emitted when primary hash was already stored | Use code 53 for duplicate-bind handling | reserved (legacy) |
 | 51 | `AttestationAppendLogCapacityReached` | `append_attestation_digest` | log length `>= MAX_ATTESTATION_APPEND_ENTRIES` | Archive off-chain; log is bounded | typed |
+| 52 | `InvalidAttestationHashLength` | `bind_primary_attestation_hash` | digest length is not 32 bytes | Provide an exact 32-byte digest | typed |
+| 53 | `AttestationHashAlreadyBound` | `bind_primary_attestation_hash` | primary hash already stored | Use `append_attestation_digest` for updates | typed |
 | 60 | `CollateralAmountNotPositive` | `record_sme_collateral_commitment` | `amount <= 0` | Provide positive metadata amount | typed |
 | 61 | `CollateralAssetEmpty` | `record_sme_collateral_commitment` | asset symbol empty | Provide non-empty asset label | typed |
 | 62 | `CollateralTimestampBackwards` | `record_sme_collateral_commitment` | new timestamp `<` stored timestamp | Use monotonic timestamps | typed |
@@ -130,6 +135,15 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 150 | `LegalHoldClearRequestMissing` | `set_legal_hold(false)`, `clear_legal_hold` | clearing with non-zero delay but no prior `request_clear_legal_hold` | Call `request_clear_legal_hold` first | typed |
 | 151 | `LegalHoldClearNotReady` | `set_legal_hold(false)`, `clear_legal_hold` | `ledger.timestamp() < clearable_at` | Wait until clear delay elapses | typed |
 | 152 | `LegalHoldClearDelayOverflow` | `request_clear_legal_hold` | `timestamp + delay` overflows `u64` | Reduce delay or timestamp | typed |
+| 153 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
+| 154 | `LegalHoldSetOnTerminalEscrow` | `set_legal_hold` | escrow status >= 2 (settled, withdrawn, cancelled, archived) | Hold cannot be set on completed escrows | typed |
+| 207 | `LegalHoldRequiresGuardianConfirmation` | `set_legal_hold(true)`, `set_legal_hold_multisig(true)` | guardian configured and immediate activation attempted | Use `propose_legal_hold` then `confirm_legal_hold` | typed |
+| 208 | `LegalHoldProposalMissing` | `confirm_legal_hold` | no proposal is pending | Call `propose_legal_hold` first | typed |
+| 209 | `LegalHoldProposalExpired` | `confirm_legal_hold` | current ledger timestamp reached proposal expiry | Submit a new admin proposal | typed |
+| 210 | `LegalHoldAuthorityMismatch` | `propose_legal_hold`, `confirm_legal_hold` | supplied address differs from current admin or configured guardian | Use the configured authority address | typed |
+| 211 | `LegalHoldGuardianNotConfigured` | `propose_legal_hold` | escrow has no guardian | Use legacy `set_legal_hold(true)` or initialize with guardian | typed |
+| 212 | `LegalHoldAlreadyActive` | `propose_legal_hold` | hold is already active | Clear the current hold before proposing another | typed |
+| 213 | `LegalHoldGuardianSameAsAdmin` | `init_with_guardian` | guardian address equals admin address | Configure an independent guardian address | typed |
 | 160 | `LegalHoldBlocksBeneficiaryRotation` | `rotate_beneficiary` | legal hold active | Clear hold before rotation | typed |
 | 161 | `RotationNotOpen` | `rotate_beneficiary` | status not `0` (open) or `1` (funded) | Rotation only before settlement | typed |
 | 162 | `NewSmeSameAsCurrent` | `rotate_beneficiary` | `new_sme == current sme_address` | Pass a different beneficiary | typed |
@@ -137,6 +151,11 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 164 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
 | 170 | `CloneNotSettled` | `clone_settled_escrow` | template escrow status `!= 2` (settled) | Use a settled escrow as template | typed |
 | 171 | `CloneAmountNotPositive` | `clone_settled_escrow` | `new_amount <= 0` | Pass a positive invoice amount for the clone | typed |
+| 200 | `ExportNotInitialized` | `export_state` | `DataKey::Escrow` missing (escrow not initialized) | Call `init` first | typed |
+| 201 | `ImportAlreadyInitialized` | `import_state` | `DataKey::Escrow` already exists (target not fresh) | Import only onto freshly deployed contract | typed |
+| 202 | `ImportSchemaMismatch` | `import_state` | `snapshot.schema_version != SCHEMA_VERSION` | Export from contract running same SCHEMA_VERSION | typed |
+| 203 | `ImportChecksumMismatch` | `import_state` | recomputed checksum differs from snapshot checksum | State was tampered with; verify export file | typed |
+| 206 | `DisputePauseDurationExceedsMax` | `pause_dispute` | `duration_secs > MAX_DISPUTE_PAUSE_DURATION_SECS` | Choose a duration within the maximum pause window | typed |
 
 ### Legacy panic strings (migration aid)
 
@@ -226,6 +245,10 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 162 | `New SME address must differ from current beneficiary` |
 | 163 | `No pending admin` |
 | 164 | `Funding deadline has passed` |
+| 200 | `Escrow not initialized (cannot export)` |
+| 201 | `Import target already initialized` |
+| 202 | `Import schema version mismatch` |
+| 203 | `Import checksum mismatch` |
 
 ## Client Guidance
 
@@ -250,6 +273,7 @@ Recommended SDK category mappings:
 | 140–143 | Cancellation or refund failure |
 | 150–152 | Legal-hold clear workflow failure |
 | 160–162 | Beneficiary rotation failure |
+| 200–203 | State export/import failure (disaster recovery) |
 
 ## Security Notes
 

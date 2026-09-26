@@ -43,9 +43,9 @@ mod tests {
 
         let report = client.detect_state_inconsistencies();
 
-        assert_eq!(report.funded_exceeds_target_not_advanced, false);
-        assert_eq!(report.funded_amount_positive_status_open, false);
-        assert_eq!(report.zero_funded_amount_advanced_status, false);
+        assert_eq!(report.funded_exceeds_target_stale, false);
+        assert_eq!(report.funded_positive_status_open, false);
+        assert_eq!(report.funded_zero_status_advanced, false);
         assert_eq!(report.funders_exist_status_open, false);
         assert_eq!(report.no_funders_advanced_status, false);
         assert_eq!(report.snapshot_exists_not_funded, false);
@@ -56,7 +56,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inconsistency_funded_exceeds_target_not_advanced() {
+    fn test_inconsistency_funded_exceeds_target_stale() {
         let env = Env::default();
         env.budget().reset_unlimited();
         let (client, admin, sme) = setup(&env);
@@ -90,11 +90,11 @@ mod tests {
 
         // Check that we have the inconsistency
         let report = client.detect_state_inconsistencies();
-        assert_eq!(report.funded_exceeds_target_not_advanced, true);
+        assert_eq!(report.funded_exceeds_target_stale, true);
     }
 
     #[test]
-    fn test_inconsistency_funded_amount_positive_status_open() {
+    fn test_inconsistency_funded_positive_status_open() {
         let env = Env::default();
         env.budget().reset_unlimited();
         let (client, admin, sme) = setup(&env);
@@ -128,7 +128,7 @@ mod tests {
 
         // Check: funded_amount > 0 but status == 0 (open)
         let report = client.detect_state_inconsistencies();
-        assert_eq!(report.funded_amount_positive_status_open, true);
+        assert_eq!(report.funded_positive_status_open, true);
     }
 
     #[test]
@@ -205,9 +205,9 @@ mod tests {
         let report = client.detect_state_inconsistencies();
 
         // We should have at least 2 inconsistencies:
-        // 1. funded_amount_positive_status_open
+        // 1. funded_positive_status_open
         // 2. funders_exist_status_open
-        assert_eq!(report.funded_amount_positive_status_open, true);
+        assert_eq!(report.funded_positive_status_open, true);
         assert_eq!(report.funders_exist_status_open, true);
     }
 
@@ -239,9 +239,9 @@ mod tests {
         let report = client.detect_state_inconsistencies();
 
         // Verify all flags are false for a valid initialized escrow
-        assert_eq!(report.funded_exceeds_target_not_advanced, false);
-        assert_eq!(report.funded_amount_positive_status_open, false);
-        assert_eq!(report.zero_funded_amount_advanced_status, false);
+        assert_eq!(report.funded_exceeds_target_stale, false);
+        assert_eq!(report.funded_positive_status_open, false);
+        assert_eq!(report.funded_zero_status_advanced, false);
         assert_eq!(report.funders_exist_status_open, false);
         assert_eq!(report.no_funders_advanced_status, false);
         assert_eq!(report.snapshot_exists_not_funded, false);
@@ -282,9 +282,9 @@ mod tests {
         let report2 = client.detect_state_inconsistencies();
 
         // Reports should be identical
-        assert_eq!(report1.funded_exceeds_target_not_advanced, report2.funded_exceeds_target_not_advanced);
-        assert_eq!(report1.funded_amount_positive_status_open, report2.funded_amount_positive_status_open);
-        assert_eq!(report1.zero_funded_amount_advanced_status, report2.zero_funded_amount_advanced_status);
+        assert_eq!(report1.funded_exceeds_target_stale, report2.funded_exceeds_target_stale);
+        assert_eq!(report1.funded_positive_status_open, report2.funded_positive_status_open);
+        assert_eq!(report1.funded_zero_status_advanced, report2.funded_zero_status_advanced);
         assert_eq!(report1.funders_exist_status_open, report2.funders_exist_status_open);
         assert_eq!(report1.no_funders_advanced_status, report2.no_funders_advanced_status);
         assert_eq!(report1.snapshot_exists_not_funded, report2.snapshot_exists_not_funded);
@@ -329,8 +329,8 @@ mod tests {
         client.fund(&investor, &500);
 
         let report = client.detect_state_inconsistencies();
-        // Status should be advanced to 1 (funded), so funded_exceeds_target_not_advanced
+        // Status should be advanced to 1 (funded), so funded_exceeds_target_stale
         // should be false
-        assert_eq!(report.funded_exceeds_target_not_advanced, false);
+        assert_eq!(report.funded_exceeds_target_stale, false);
     }
 }

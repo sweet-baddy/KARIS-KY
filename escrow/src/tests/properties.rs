@@ -3,6 +3,52 @@ use proptest::prelude::*;
 use std::collections::BTreeSet;
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn prop_attestation_append_log_never_exceeds_capacity(append_calls in 1usize..=40) {
+        let env = Env::default();
+        let (client, admin, sme) = setup(&env);
+        default_init(&client, &env, &admin, &sme);
+
+        for index in 0..append_calls {
+            let digest = soroban_sdk::BytesN::from_array(&env, &[index as u8; 32]);
+            let result = client.try_append_attestation_digest(&digest);
+            if index < MAX_ATTESTATION_APPEND_ENTRIES as usize {
+                prop_assert!(result.is_ok(), "append {} should succeed", index + 1);
+            } else {
+                assert_contract_error(
+                    result,
+                    EscrowError::AttestationAppendLogCapacityReached,
+                );
+            }
+            prop_assert!(
+                client.get_attestation_append_log().len() <= MAX_ATTESTATION_APPEND_ENTRIES,
+                "append log exceeded its capacity after call {}",
+                index + 1,
+            );
+        }
+
+        for index in append_calls..MAX_ATTESTATION_APPEND_ENTRIES as usize {
+            let digest = soroban_sdk::BytesN::from_array(&env, &[index as u8; 32]);
+            prop_assert!(client.try_append_attestation_digest(&digest).is_ok());
+            prop_assert!(
+                client.get_attestation_append_log().len() <= MAX_ATTESTATION_APPEND_ENTRIES,
+            );
+        }
+
+        let overflow_digest = soroban_sdk::BytesN::from_array(&env, &[0xFF; 32]);
+        assert_contract_error(
+            client.try_append_attestation_digest(&overflow_digest),
+            EscrowError::AttestationAppendLogCapacityReached,
+        );
+        prop_assert!(
+            client.get_attestation_append_log().len() <= MAX_ATTESTATION_APPEND_ENTRIES,
+        );
+    }
+}
+
+proptest! {
     #[test]
     fn prop_funded_amount_non_decreasing(
         amount1 in 1i128..50_000_000_000i128,
@@ -944,8 +990,8 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
             &None,
             &None,
             &None,
-        &None,
-        &None,
+            &None,
+            &None,
         );
 
         // Randomize investor count/order and positive amounts. Keep the sequence small so

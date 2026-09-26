@@ -6,7 +6,7 @@
     "name": "LiquifactEscrow",
     "package": "karis_ky_escrow",
     "description": "Holds investor funds for an invoice until settlement on Stellar Soroban",
-    "schema_version": 6,
+    "schema_version": 8,
     "interface_version": 1
   },
   "entrypoints": [
@@ -30,7 +30,42 @@
         { "name": "max_per_investor", "type": "Option<i128>", "description": "Per-investor contribution cap; null for unlimited" },
         { "name": "legal_hold_clear_delay", "type": "Option<u64>", "description": "Minimum delay (seconds) for two-phase legal hold clear" },
         { "name": "funding_deadline", "type": "Option<u64>", "description": "Ledger timestamp after which funding is rejected" },
-        { "name": "yield_slippage_threshold", "type": "Option<i64>", "description": "Bps threshold for yield slippage detection (0..=10_000)" }
+        { "name": "max_funding_rate", "type": "Option<u64>", "description": "Optional funding-rate limit" },
+        { "name": "yield_slippage_threshold", "type": "Option<i64>", "description": "Bps threshold for yield slippage detection (0..=10_000)" },
+        { "name": "settlement_notifier_contract", "type": "Option<Address>", "description": "Optional settlement notifier contract" },
+        { "name": "kyc_provider_contract", "type": "Option<Address>", "description": "Optional KYC provider contract" },
+        { "name": "admin_roles", "type": "Option<Vec<(Address, AdminRole)>>", "description": "Optional admin role assignments" },
+        { "name": "reject_contract_admin", "type": "Option<bool>", "description": "Reject contract admins when true" }
+      ],
+      "returns": { "type": "InvoiceEscrow", "description": "The initialized escrow state" }
+    },
+    {
+      "name": "init_with_guardian",
+      "description": "Initialize an escrow with a distinct legal-hold guardian. Pending hold proposals expire after 3,600 seconds.",
+      "auth": "admin",
+      "params": [
+        { "name": "admin", "type": "Address", "description": "Current escrow admin" },
+        { "name": "guardian", "type": "Address", "description": "Independent legal-hold confirmation authority" },
+        { "name": "invoice_id", "type": "String", "description": "Invoice identifier" },
+        { "name": "sme_address", "type": "Address", "description": "Invoice issuer" },
+        { "name": "amount", "type": "i128", "description": "Funding target in token base units" },
+        { "name": "yield_bps", "type": "i64", "description": "Annualized yield in basis points" },
+        { "name": "maturity", "type": "u64", "description": "Settlement maturity timestamp" },
+        { "name": "funding_token", "type": "Address", "description": "SEP-41 funding token" },
+        { "name": "registry", "type": "Option<Address>", "description": "Optional registry hint" },
+        { "name": "treasury", "type": "Address", "description": "Treasury address" },
+        { "name": "yield_tiers", "type": "Option<Vec<YieldTier>>", "description": "Optional yield tiers" },
+        { "name": "min_contribution", "type": "Option<i128>", "description": "Optional minimum contribution" },
+        { "name": "max_unique_investors", "type": "Option<u32>", "description": "Optional investor-count cap" },
+        { "name": "max_per_investor", "type": "Option<i128>", "description": "Optional per-investor cap" },
+        { "name": "legal_hold_clear_delay", "type": "Option<u64>", "description": "Optional hold-clear delay" },
+        { "name": "funding_deadline", "type": "Option<u64>", "description": "Optional funding deadline" },
+        { "name": "max_funding_rate", "type": "Option<u64>", "description": "Optional funding-rate cap" },
+        { "name": "yield_slippage_threshold", "type": "Option<i64>", "description": "Optional yield-slippage threshold" },
+        { "name": "settlement_notifier_contract", "type": "Option<Address>", "description": "Optional settlement notifier" },
+        { "name": "kyc_provider_contract", "type": "Option<Address>", "description": "Optional KYC provider" },
+        { "name": "admin_roles", "type": "Option<Vec<(Address, AdminRole)>>", "description": "Optional admin role list" },
+        { "name": "reject_contract_admin", "type": "Option<bool>", "description": "Reject contract admins when true" }
       ],
       "returns": { "type": "InvoiceEscrow", "description": "The initialized escrow state" }
     },
@@ -63,6 +98,15 @@
         { "name": "entries", "type": "Vec<(Address, i128)>", "description": "Vector of (investor_address, amount) pairs; max 50" }
       ],
       "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state" }
+    },
+    {
+      "name": "batch_fund",
+      "description": "Atomic multi-investor funding in a single transaction (FEAT-001). Requires per-investor auth for each entry. Emits per-entry EscrowFunded/FundReceived events and one BatchFundCompleted summary event. Max 50 entries.",
+      "auth": "per-investor",
+      "params": [
+        { "name": "contributions", "type": "Vec<(Address, i128)>", "description": "Vector of (investor_address, amount) pairs; max 50. Each entry requires that investor's require_auth()." }
+      ],
+      "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state after all contributions are applied" }
     },
     {
       "name": "settle",
@@ -118,6 +162,24 @@
       "auth": "admin",
       "params": [
         { "name": "active", "type": "bool", "description": "true = enable hold, false = clear hold" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "propose_legal_hold",
+      "description": "Propose a legal hold for confirmation by the configured guardian. Expires after 3,600 seconds.",
+      "auth": "current admin",
+      "params": [
+        { "name": "admin", "type": "Address", "description": "Current admin address authorizing the proposal" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "confirm_legal_hold",
+      "description": "Activate a pending legal hold before its expiry.",
+      "auth": "configured guardian",
+      "params": [
+        { "name": "guardian", "type": "Address", "description": "Configured guardian address authorizing confirmation" }
       ],
       "returns": { "type": "null", "description": "No return value" }
     },
@@ -309,12 +371,15 @@
     { "name": "get_sme_collateral_commitment", "description": "Read SME collateral metadata (null when never recorded)", "returns": { "type": "Option<SmeCollateralCommitment>" } },
     { "name": "get_primary_attestation_hash", "description": "Read primary attestation digest (null when unset)", "returns": { "type": "Option<BytesN<32>>" } },
     { "name": "get_attestation_append_log", "description": "Read attestation audit log (empty array when unset)", "returns": { "type": "Vec<BytesN<32>>" } },
+    { "name": "get_attestation_log", "description": "Read all attestation digests in insertion order (empty array when unset)", "returns": { "type": "Vec<BytesN<32>>" } },
     { "name": "get_template", "description": "Read a template by name; returns null when unknown", "params": [{ "name": "name", "type": "String" }], "returns": { "type": "Option<EscrowTemplate>" } },
     { "name": "has_maturity_lock", "description": "Check if escrow has a configured maturity time lock", "returns": { "type": "bool" } }
   ],
   "events": [
     { "name": "EscrowInitialized", "topics": ["name"], "description": "Emitted after successful init" },
     { "name": "EscrowFunded", "topics": ["name", "invoice_id", "investor"], "description": "Emitted on each fund/fund_with_commitment call" },
+    { "name": "FundReceived", "topics": ["name", "invoice_id", "actor"], "description": "Versioned counterpart to EscrowFunded carrying actor + timestamp" },
+    { "name": "BatchFundCompleted", "topics": ["name", "invoice_id"], "description": "Emitted once by batch_fund after all entries are processed; carries total_funded_amount, investor_count, escrow_funded_amount, and status" },
     { "name": "EscrowSettled", "topics": ["name", "invoice_id"], "description": "Emitted when settle succeeds" },
     { "name": "EscrowPartialSettle", "topics": ["name", "invoice_id"], "description": "Emitted when partial settlement is recorded" },
     { "name": "SmeWithdrew", "topics": ["name", "invoice_id"], "description": "Emitted when SME withdraws liquidity" },
@@ -323,6 +388,7 @@
     { "name": "InvestorRefundedEvt", "topics": ["name", "investor", "invoice_id"], "description": "Emitted when investor receives a refund" },
     { "name": "TreasuryDustSwept", "topics": ["name"], "description": "Emitted on terminal dust sweep" },
     { "name": "LegalHoldChanged", "topics": ["name", "invoice_id"], "description": "Emitted when legal hold is toggled" },
+    { "name": "LegalHoldProposed", "topics": ["name", "invoice_id"], "description": "Emitted when admin proposes a hold for guardian confirmation" },
     { "name": "LegalHoldClearRequested", "topics": ["name", "invoice_id"], "description": "Emitted when clear hold is requested" },
     { "name": "MaturityUpdatedEvent", "topics": ["name", "invoice_id"], "description": "Emitted when maturity is updated" },
     { "name": "FundingTargetUpdated", "topics": ["name", "invoice_id"], "description": "Emitted when funding target changes" },
@@ -332,6 +398,7 @@
     { "name": "BeneficiaryRotated", "topics": ["name", "invoice_id"], "description": "Emitted when SME address changes" },
     { "name": "CollateralRecordedEvt", "topics": ["name"], "description": "Emitted when SME records collateral metadata" },
     { "name": "PrimaryAttestationBound", "topics": ["name"], "description": "Emitted when primary attestation hash is bound" },
+    { "name": "AttestationBoundEvt", "topics": ["name"], "description": "Emitted when primary attestation hash is bound; data contains the 32-byte hash and ledger timestamp" },
     { "name": "AttestationDigestAppended", "topics": ["name"], "description": "Emitted when attestation digest is appended" },
     { "name": "AttestationDigestRevoked", "topics": ["name"], "description": "Emitted when attestation digest is revoked" },
     { "name": "AllowlistEnabledChanged", "topics": ["name"], "description": "Emitted when allowlist gate is toggled" },
@@ -353,7 +420,8 @@
         { "name": "funded_amount", "type": "i128", "description": "Running total of investor principal" },
         { "name": "yield_bps", "type": "i64", "description": "Base annualized yield in basis points" },
         { "name": "maturity", "type": "u64", "description": "Ledger timestamp; 0 = no maturity gate" },
-        { "name": "status", "type": "u32", "description": "0=open, 1=funded, 2=settled, 3=withdrawn, 4=cancelled" }
+        { "name": "status", "type": "u32", "description": "0=open, 1=funded, 2=settled, 3=withdrawn, 4=cancelled" },
+        { "name": "guardian", "type": "Option<Address>", "description": "Optional independent legal-hold confirmation authority" }
       ]
     },
     "YieldTier": {
@@ -425,6 +493,7 @@
       "settlement_payout": { "range": "120-129", "description": "Settle, withdraw, investor claims, payout math" },
       "cancel_refund": { "range": "140-143", "description": "Cancel funding and investor refunds" },
       "legal_hold_clear": { "range": "150-152", "description": "Delayed compliance-hold lift workflow" },
+      "legal_hold_activation": { "range": "207-213", "description": "Guardian-protected legal-hold activation" },
       "beneficiary_rotation": { "range": "160-164", "description": "Governed SME rotation, admin handover, funding deadline" }
     },
     "codes": {
@@ -459,6 +528,7 @@
       "42": "SweepExceedsLiabilityFloor",
       "50": "PrimaryAttestationAlreadyBound",
       "51": "AttestationAppendLogCapacityReached",
+      "53": "AttestationHashAlreadyBound",
       "60": "CollateralAmountNotPositive",
       "61": "CollateralAssetEmpty",
       "62": "CollateralTimestampBackwards",
@@ -507,6 +577,13 @@
       "150": "LegalHoldClearRequestMissing",
       "151": "LegalHoldClearNotReady",
       "152": "LegalHoldClearDelayOverflow",
+      "207": "LegalHoldRequiresGuardianConfirmation",
+      "208": "LegalHoldProposalMissing",
+      "209": "LegalHoldProposalExpired",
+      "210": "LegalHoldAuthorityMismatch",
+      "211": "LegalHoldGuardianNotConfigured",
+      "212": "LegalHoldAlreadyActive",
+      "213": "LegalHoldGuardianSameAsAdmin",
       "160": "LegalHoldBlocksBeneficiaryRotation",
       "161": "RotationNotOpen",
       "162": "NewSmeSameAsCurrent",

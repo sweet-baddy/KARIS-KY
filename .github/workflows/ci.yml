@@ -21,10 +21,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
-        run: cargo fmt -p karis-ky_escrow -- --check
+        run: cargo fmt -p karis_ky_escrow -- --check
 
       - name: Clippy
-        run: cargo clippy -p karis-ky_escrow -- -D warnings
+        run: cargo clippy -p karis_ky_escrow -- -D warnings
 
       - name: Build
         run: cargo build
@@ -37,6 +37,11 @@ jobs:
 
       - name: Run tests
         run: cargo test
+
+      - name: Run snapshot tests
+        run: cargo test --test snapshots
+        env:
+          INSTA_FORCE_ACCEPT: "false"
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -66,6 +71,35 @@ jobs:
           python3 scripts/validate_build_metadata.py \
             --json target/build_metadata.json \
             --lib escrow/src/lib.rs
+
+      - name: Validate WASM build metadata matches current commit
+        # Asserts the metadata embedded in the freshly built WASM artifact
+        # matches the current commit SHA and the expected schema version.
+        # Fails CI if build.rs did not regenerate constants (e.g. stale
+        # incremental builds) or if the schema version drifted.
+        run: |
+          python3 scripts/validate_build_metadata.py \
+            --wasm target/wasm32-unknown-unknown/release/karis_ky_escrow.wasm \
+            --commit "$GITHUB_SHA" \
+            --schema-version "${SCHEMA_VERSION:-6}"
+        env:
+          SCHEMA_VERSION: "6"
+
+      # -----------------------------------------------------------------------
+      # Schema version compatibility matrix validation
+      # -----------------------------------------------------------------------
+      #
+      # Validates that SCHEMA_VERSION in escrow/src/lib.rs matches the latest
+      # entry in docs/VERSION_INTEROPERABILITY_MATRIX.md. Catches drift that
+      # could lead operators to attempt unsupported upgrade paths.
+
+      - name: Validate schema version matrix
+        run: |
+          python3 scripts/validate_schema_version_matrix.py
+
+      - name: Test schema version matrix validation
+        run: |
+          python3 scripts/test_validate_schema_version_matrix.py
 
       # -----------------------------------------------------------------------
       # WASM size tracking
@@ -178,7 +212,7 @@ jobs:
       # -----------------------------------------------------------------------
 
       - name: Workspace Clippy (all targets)
-        run: cargo clippy -p karis-ky_escrow --all-targets -- -D warnings
+        run: cargo clippy -p karis_ky_escrow --all-targets -- -D warnings
 
       - name: Check coverage (≥ 95%)
         run: |
@@ -186,4 +220,4 @@ jobs:
             --features testutils \
             --fail-under-lines 95 \
             --summary-only \
-            -p karis-ky_escrow
+            -p karis_ky_escrow

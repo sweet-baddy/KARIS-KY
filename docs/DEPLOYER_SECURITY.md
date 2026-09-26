@@ -369,7 +369,7 @@ Before mainnet deployment, confirm:
 
 ## References
 
-- [`docs/OPERATOR_RUNBOOK.md`](OPERATOR_RUNBOOK.md) — Redeploy vs. upgrade decisions and WASM update ceremony.
+- [`docs/OPERATOR_RUNBOOK.md`](OPERATOR_RUNBOOK.md) — Redeploy vs. upgrade decisions, WASM update ceremony, and **legal hold + dispute pause interaction matrix** (§8).
 - [`docs/escrow-security-checklist.md`](escrow-security-checklist.md) — Auth matrix, invariants, and threat model.
 - [`docs/escrow-events.md`](escrow-events.md) — Event schema and monitoring targets.
 - [`docs/escrow-legal-hold.md`](escrow-legal-hold.md) — Legal hold mechanism and governance implications.

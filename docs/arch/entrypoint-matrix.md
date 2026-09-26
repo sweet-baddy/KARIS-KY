@@ -69,7 +69,7 @@ graph LR
     SME["SME"] --> has_maturity_lock["💬 has_maturity_lock()"]
     SME["SME"] --> rotate_beneficiary["💬 rotate_beneficiary()"]
     SME["SME"] --> get_sme_collateral_commitment["💬 get_sme_collateral_commitment()"]
-    SME["SME"] --> record_sme_collateral_commitment["💬 record_sme_collateral_commitment()"]
+    SME["SME"] --> record_sme_collateral_commitment["💬 record_sme_collateral_commitment()<br/>⚠️ Metadata only"]
     TREASURY["TREASURY"] --> get_treasury["💬 get_treasury()"]
 ```
 

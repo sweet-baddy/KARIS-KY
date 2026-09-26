@@ -57,3 +57,40 @@ Because the contract only records numeric state and collateral metadata (aside f
 - The escrow contract is safe for algebraic accounting of on-chain amounts.
 - The integration layer must reject unsupported token patterns before calling escrow entrypoints.
 - The collateral commitment record is not an on-chain asset lock and should not be treated as proof of custody; see [`escrow-sme-collateral.md`](escrow-sme-collateral.md).
+
+---
+
+## Security audit findings (2026-08-26, schema v7)
+
+A full audit of all token transfer call sites in `external_calls.rs` and `lib.rs` was completed.
+Full report: [`docs/audit-handoff-escrow.md`](audit-handoff-escrow.md).
+
+### Call sites audited
+
+All on-chain token movement goes through one function:
+`external_calls::transfer_funding_token_with_balance_checks`. There are exactly **4** call sites:
+
+| Entrypoint | Transfer direction | CEI compliant |
+|-----------|-------------------|:-------------:|
+| `sweep_terminal_dust` | contract → treasury | ✅ |
+| `settle` (protocol fee path) | contract → treasury | ⚠️ informational — see below |
+| `withdraw` | contract → sme_address | ✅ |
+| `refund` | contract → investor | ✅ |
+
+### Findings
+
+| ID | Severity | Finding |
+|----|----------|---------|
+| AUDIT-001 | Informational | `settle()` writes `DataKey::Escrow` to persistent storage after the fee transfer. `DataKey::SettledAmount` and the in-memory `escrow.status = 2` are both set before the call. Not exploitable in the Soroban host model (host functions run to completion with no mid-execution re-entry). Recommendation: move the `DataKey::Escrow` write before the fee transfer in a future refactor for strict CEI alignment. |
+| AUDIT-002 | None | Error codes 36–42 are complete and consistent between `EscrowError` in `lib.rs` and the canonical reference in `escrow-error-messages.md`. No gaps. |
+| AUDIT-003 | None | SEP-41 `transfer` returns `()`. There is no return value to miss. Correctness is enforced entirely by the post-call balance assertions inside the wrapper. |
+| AUDIT-004 | None | Reentrancy is structurally prevented by the Soroban host model. Pre/post balance checks are defense-in-depth, not a reentrancy guard. |
+| AUDIT-005 | None | No `transfer_from` calls exist anywhere in this contract. |
+| AUDIT-006 | None | 22 dedicated external-calls tests cover fee-on-transfer mock rejection, zero/negative/insufficient-amount guards, large amounts, and sequential transfer invariants. |
+
+### Token integration requirements (summary)
+
+- ✅ Use standard SEP-41 tokens only (USDC, USDT, EURC, or equivalent).
+- ❌ Do not use fee-on-transfer, rebasing, hook, paused, or blacklisted tokens — the wrapper will reject them with typed errors (codes 36–41) but they must be excluded before deployment.
+- ✅ Confirm the token contract ID is audited and allowlisted by governance before calling `init`.
+- ✅ Operators must ensure the contract holds sufficient token balance before calling `settle` (fee path), `withdraw`, or `refund`; insufficient balance produces a typed error (code 37).
