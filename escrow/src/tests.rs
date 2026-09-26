@@ -60,6 +60,7 @@ mod properties;
 mod properties_funding;
 mod secure_rng;
 mod settlement;
+mod tier_table;
 mod tokenomics;
 mod upgrade_compat;
 mod validation;
