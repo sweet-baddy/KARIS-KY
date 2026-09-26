@@ -1,6 +1,6 @@
 # Escrow Init Parameters — Reference Guide
 
-> **Contract version:** `SCHEMA_VERSION = 6` | `INTERFACE_VERSION = 1`  
+> **Contract version:** `SCHEMA_VERSION = 8` | `INTERFACE_VERSION = 1`
 > **Target audience:** Operators, integrators, and SDK consumers calling `LiquifactEscrow::init`
 
 This document describes every parameter accepted by [`init`](../escrow/src/lib.rs), including

@@ -47,6 +47,7 @@ The current contract defines 21 event structs.
 | `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `LegalHoldChanged` | `legalhld` | `set_legal_hold`, `clear_legal_hold` |
+| `LegalHoldProposed` | `lh_prop` | `propose_legal_hold` |
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
 | `SmeWithdrew` | `sme_wd` | `withdraw` |
 | `InvestorPayoutClaimed` | `inv_claim` | `claim_investor_payout` |
@@ -258,6 +259,16 @@ Data:
 | Field | Type | Values |
 |---|---|---|
 | `active` | `u32` | `1` = enabled, `0` = cleared |
+
+### `LegalHoldProposed`
+
+Emitted after the current admin proposes a legal hold that requires guardian
+confirmation. The pending proposal expires one hour after its ledger timestamp.
+
+| Field | Type |
+|---|---|
+| `admin` | `Address` |
+| `expires_at` | `u64` |
 
 ### `CollateralRecordedEvt`
 

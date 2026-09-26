@@ -147,9 +147,10 @@ include!(concat!(env!("OUT_DIR"), "/build_info.rs"));
 /// | 5 | Added `YieldTierTable`, `RegistryRef`, `Treasury`; `fund_with_commitment` | **Redeploy required** if `InvoiceEscrow` XDR changed |
 /// | 6 | Per-investor keys moved to **persistent** storage (see ADR-007) | **Redeploy required** — no `migrate` path (addresses not enumerable) |
 /// | 7 | Added `updated_at` to `SmeCollateralCommitment`; `bind_primary_attestation_hash` now accepts `Bytes` with explicit length validation (#207, #208) | **Redeploy required** — `SmeCollateralCommitment` XDR shape changed |
+/// | 8 | Added optional `InvoiceEscrow::guardian` for two-step legal-hold activation | **Redeploy required** — `InvoiceEscrow` XDR shape changed |
 ///
 /// See `docs/OPERATOR_RUNBOOK.md` for the full redeploy-vs-upgrade decision tree.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// Interface ABI version for the deployed escrow contract.
 ///
@@ -246,6 +247,8 @@ pub const MAX_SNAPSHOT_NAME_LEN: u32 = 32;
 /// Upper bound on state snapshots to keep storage bounded and prevent abuse.
 /// Admin may create at most this many named snapshots per escrow instance.
 pub const MAX_STATE_SNAPSHOTS: u32 = 16;
+/// Pending legal-hold proposals expire one hour after admin authorization.
+pub const LEGAL_HOLD_PROPOSAL_TTL_SECS: u64 = 3_600;
 
 /// Stable typed errors emitted by karis-ky escrow entrypoints.
 ///
@@ -512,6 +515,20 @@ pub enum EscrowError {
     ReinvestYieldInsufficient = 184,
     /// [`LiquifactEscrow::withdraw`] called by a caller that is not the registered SME address.
     UnauthorizedWithdrawer = 185,
+    /// A guardian-configured escrow requires admin proposal and guardian confirmation to activate a hold.
+    LegalHoldRequiresGuardianConfirmation = 207,
+    /// No legal-hold proposal is pending for guardian confirmation.
+    LegalHoldProposalMissing = 208,
+    /// A pending legal-hold proposal has expired.
+    LegalHoldProposalExpired = 209,
+    /// The supplied guardian or admin does not match the configured escrow authority.
+    LegalHoldAuthorityMismatch = 210,
+    /// No guardian is configured for this escrow.
+    LegalHoldGuardianNotConfigured = 211,
+    /// A legal hold is already active.
+    LegalHoldAlreadyActive = 212,
+    /// The configured legal-hold guardian must be distinct from the escrow admin.
+    LegalHoldGuardianSameAsAdmin = 213,
 }
 
 #[inline(always)]
@@ -562,7 +579,7 @@ pub enum DataKey {
     /// **Persistent** storage. Absent ⇒ `0`. One entry per investor address.
     InvestorContribution(Address),
     /// When true, compliance/legal hold blocks payouts and settlement finalization.
-    /// Absent ⇒ `false` (no hold). Toggled by admin via [`LiquifactEscrow::set_legal_hold`].
+    /// Absent ⇒ `false` (no hold). Set through legacy admin activation or guardian confirmation.
     LegalHold,
     /// Optional minimum ledger timestamp when `LegalHold` may be cleared after a
     /// [`LiquifactEscrow::request_clear_legal_hold`] call.
@@ -669,6 +686,9 @@ pub enum DataKey {
     /// Flag indicating whether automatic yield distribution snapshots are enabled for this escrow.
     /// Absent ⇒ false (default off, backwards-compatible). Set during [`LiquifactEscrow::init`].
     YieldAutoDistributionEnabled,
+    /// Expiration timestamp for an admin-proposed legal hold awaiting guardian confirmation.
+    /// Absent ⇒ no legal-hold proposal is pending. Appended to preserve existing key discriminants.
+    LegalHoldProposalExpiresAt,
 }
 
 // --- Data types ---
@@ -694,6 +714,7 @@ pub struct InvoiceEscrow {
     pub maturity: u64,
     /// 0 = open, 1 = funded, 2 = settled, 3 = withdrawn (SME pulled liquidity), 4 = cancelled (admin-gated; investors may refund), 5 = archived (admin-gated; read-only terminal)
     pub status: u32,
+    pub guardian: Option<Address>,
 }
 
 /// SME-reported collateral metadata for off-chain risk review.
@@ -1341,6 +1362,16 @@ pub struct LegalHoldClearRequested {
     pub clearable_at: u64,
 }
 
+#[contractevent]
+pub struct LegalHoldProposed {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub admin: Address,
+    pub expires_at: u64,
+}
+
 /// Emitted when a dispute pause is activated or resumed on an escrow.
 ///
 /// Dispute pause is separate from legal hold and is used for temporary resolution
@@ -1985,7 +2016,7 @@ pub struct LegalHoldSet {
     /// Escrow invoice identifier.
     #[topic]
     pub invoice_id: Symbol,
-    /// Address that toggled the hold (must be admin).
+    /// Admin that cleared the hold or guardian that confirmed its activation.
     #[topic]
     pub actor: Address,
     /// Ledger timestamp when the hold was toggled.
@@ -2357,7 +2388,120 @@ impl LiquifactEscrow {
         admin_roles: Option<Vec<(Address, AdminRole)>>,
         reject_contract_admin: Option<bool>,
     ) -> InvoiceEscrow {
+        Self::init_internal(
+            env,
+            admin,
+            None,
+            invoice_id,
+            sme_address,
+            amount,
+            yield_bps,
+            maturity,
+            funding_token,
+            registry,
+            treasury,
+            yield_tiers,
+            min_contribution,
+            max_unique_investors,
+            max_per_investor,
+            legal_hold_clear_delay,
+            funding_deadline,
+            max_funding_rate,
+            yield_slippage_threshold,
+            settlement_notifier_contract,
+            kyc_provider_contract,
+            admin_roles,
+            reject_contract_admin,
+        )
+    }
+
+    /// Initialize an escrow with a separate legal-hold guardian. Existing deployments and
+    /// callers using [`LiquifactEscrow::init`] remain guardian-free.
+    pub fn init_with_guardian(
+        env: Env,
+        admin: Address,
+        guardian: Address,
+        invoice_id: String,
+        sme_address: Address,
+        amount: i128,
+        yield_bps: i64,
+        maturity: u64,
+        funding_token: Address,
+        registry: Option<Address>,
+        treasury: Address,
+        yield_tiers: Option<Vec<YieldTier>>,
+        min_contribution: Option<i128>,
+        max_unique_investors: Option<u32>,
+        max_per_investor: Option<i128>,
+        legal_hold_clear_delay: Option<u64>,
+        funding_deadline: Option<u64>,
+        max_funding_rate: Option<u64>,
+        yield_slippage_threshold: Option<i64>,
+        settlement_notifier_contract: Option<Address>,
+        kyc_provider_contract: Option<Address>,
+        admin_roles: Option<Vec<(Address, AdminRole)>>,
+        reject_contract_admin: Option<bool>,
+    ) -> InvoiceEscrow {
+        Self::init_internal(
+            env,
+            admin,
+            Some(guardian),
+            invoice_id,
+            sme_address,
+            amount,
+            yield_bps,
+            maturity,
+            funding_token,
+            registry,
+            treasury,
+            yield_tiers,
+            min_contribution,
+            max_unique_investors,
+            max_per_investor,
+            legal_hold_clear_delay,
+            funding_deadline,
+            max_funding_rate,
+            yield_slippage_threshold,
+            settlement_notifier_contract,
+            kyc_provider_contract,
+            admin_roles,
+            reject_contract_admin,
+        )
+    }
+
+    fn init_internal(
+        env: Env,
+        admin: Address,
+        guardian: Option<Address>,
+        invoice_id: String,
+        sme_address: Address,
+        amount: i128,
+        yield_bps: i64,
+        maturity: u64,
+        funding_token: Address,
+        registry: Option<Address>,
+        treasury: Address,
+        yield_tiers: Option<Vec<YieldTier>>,
+        min_contribution: Option<i128>,
+        max_unique_investors: Option<u32>,
+        max_per_investor: Option<i128>,
+        legal_hold_clear_delay: Option<u64>,
+        funding_deadline: Option<u64>,
+        max_funding_rate: Option<u64>,
+        yield_slippage_threshold: Option<i64>,
+        settlement_notifier_contract: Option<Address>,
+        kyc_provider_contract: Option<Address>,
+        admin_roles: Option<Vec<(Address, AdminRole)>>,
+        reject_contract_admin: Option<bool>,
+    ) -> InvoiceEscrow {
         admin.require_auth();
+        if let Some(ref guardian_address) = guardian {
+            ensure(
+                &env,
+                guardian_address != &admin,
+                EscrowError::LegalHoldGuardianSameAsAdmin,
+            );
+        }
 
         // ── Contract-admin detection ──────────────────────────────────────────
         // A contract address as admin is legitimate (multisig, DAO timelock) but
@@ -2422,6 +2566,7 @@ impl LiquifactEscrow {
         let escrow = InvoiceEscrow {
             invoice_id: invoice_sym.clone(),
             admin: admin.clone(),
+            guardian,
             sme_address: sme_address.clone(),
             amount,
             funding_target: amount,
@@ -3960,8 +4105,9 @@ impl LiquifactEscrow {
     /// Multisig-gated variant of [`LiquifactEscrow::set_legal_hold`] for operators using
     /// [`LiquifactEscrow::init_multisig_policy`] to require multiple co-signers for legal hold
     /// changes. Checks operation tag `"legal_hold"`; falls back to the single
-    /// [`InvoiceEscrow::admin`] signature when no policy covers it. Applies the same
-    /// two-phase clear-delay gate as [`LiquifactEscrow::set_legal_hold`].
+    /// [`InvoiceEscrow::admin`] signature when no policy covers it. Immediate activation is
+    /// rejected if a guardian is configured. Applies the same two-phase clear-delay gate as
+    /// [`LiquifactEscrow::set_legal_hold`].
     pub fn set_legal_hold_multisig(env: Env, signers: Vec<Address>, active: bool, reason: String) {
         let escrow = Self::get_escrow(env.clone());
         Self::require_multisig_or_admin(
@@ -3970,6 +4116,10 @@ impl LiquifactEscrow {
             Symbol::new(&env, "legal_hold"),
             signers.clone(),
         );
+
+        if active && escrow.guardian.is_some() {
+            fail(&env, EscrowError::LegalHoldRequiresGuardianConfirmation);
+        }
 
         if !active && Self::legal_hold_active(&env) {
             let delay = Self::get_legal_hold_clear_delay(env.clone());
@@ -3993,6 +4143,9 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .remove(&DataKey::LegalHoldClearableAt);
+        env.storage()
+            .instance()
+            .remove(&DataKey::LegalHoldProposalExpiresAt);
         env.storage().instance().set(&DataKey::LegalHold, &active);
 
         LegalHoldChangedMultisig {
@@ -4448,7 +4601,10 @@ impl LiquifactEscrow {
         commitment
     }
 
-    /// Set or clear compliance hold. Only the **current** [`InvoiceEscrow::admin`] may call.
+    /// Set or clear compliance hold. Clearing requires the current [`InvoiceEscrow::admin`].
+    /// Activation also requires only the admin when no guardian is configured; when a guardian
+    /// is configured, use [`LiquifactEscrow::propose_legal_hold`] and
+    /// [`LiquifactEscrow::confirm_legal_hold`] instead.
     ///
     /// **Clearing:** always requires the current admin's authorization — there is no timelock,
     /// council override, or break-glass entrypoint. After
@@ -4461,6 +4617,10 @@ impl LiquifactEscrow {
     /// `docs/escrow-legal-hold.md`.
     pub fn set_legal_hold(env: Env, active: bool, reason: String) {
         let escrow = Self::load_escrow_require_admin(&env);
+
+        if active && escrow.guardian.is_some() {
+            fail(&env, EscrowError::LegalHoldRequiresGuardianConfirmation);
+        }
 
         // Check if escrow is in a terminal status (2, 3, 4, or 5)
         // Terminal statuses: 2 = settled, 3 = withdrawn, 4 = cancelled, 5 = archived
@@ -4499,6 +4659,9 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .remove(&DataKey::LegalHoldClearableAt);
+        env.storage()
+            .instance()
+            .remove(&DataKey::LegalHoldProposalExpiresAt);
 
         env.storage().instance().set(&DataKey::LegalHold, &active);
 
@@ -4526,6 +4689,107 @@ impl LiquifactEscrow {
             actor: escrow.admin.clone(),
             timestamp: env.ledger().timestamp(),
             active: if active { 1 } else { 0 },
+        }
+        .publish(&env);
+    }
+
+    /// Propose a legal hold for guardian confirmation. Proposals expire after
+    /// [`LEGAL_HOLD_PROPOSAL_TTL_SECS`] seconds of ledger time.
+    pub fn propose_legal_hold(env: Env, admin: Address) {
+        let escrow = Self::get_escrow(env.clone());
+        ensure(
+            &env,
+            admin == escrow.admin,
+            EscrowError::LegalHoldAuthorityMismatch,
+        );
+        Self::require_admin_role(&env, &escrow, &admin, AdminRole::Full);
+        ensure(
+            &env,
+            escrow.guardian.is_some(),
+            EscrowError::LegalHoldGuardianNotConfigured,
+        );
+        ensure(
+            &env,
+            escrow.status < 2,
+            EscrowError::LegalHoldSetOnTerminalEscrow,
+        );
+        ensure(
+            &env,
+            !Self::legal_hold_active(&env),
+            EscrowError::LegalHoldAlreadyActive,
+        );
+
+        let expires_at = env
+            .ledger()
+            .timestamp()
+            .checked_add(LEGAL_HOLD_PROPOSAL_TTL_SECS)
+            .unwrap_or_else(|| fail(&env, EscrowError::LedgerTimestampOverflow));
+        env.storage()
+            .instance()
+            .set(&DataKey::LegalHoldProposalExpiresAt, &expires_at);
+
+        LegalHoldProposed {
+            name: symbol_short!("lh_prop"),
+            invoice_id: escrow.invoice_id,
+            admin,
+            expires_at,
+        }
+        .publish(&env);
+    }
+
+    /// Confirm a pending legal hold using the configured guardian address.
+    pub fn confirm_legal_hold(env: Env, guardian: Address) {
+        let escrow = Self::get_escrow(env.clone());
+        ensure(
+            &env,
+            escrow.guardian.as_ref() == Some(&guardian),
+            EscrowError::LegalHoldAuthorityMismatch,
+        );
+        guardian.require_auth();
+        ensure(
+            &env,
+            escrow.status < 2,
+            EscrowError::LegalHoldSetOnTerminalEscrow,
+        );
+
+        let expires_at: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LegalHoldProposalExpiresAt)
+            .unwrap_or_else(|| fail(&env, EscrowError::LegalHoldProposalMissing));
+        ensure(
+            &env,
+            env.ledger().timestamp() < expires_at,
+            EscrowError::LegalHoldProposalExpired,
+        );
+        ensure(
+            &env,
+            !Self::legal_hold_active(&env),
+            EscrowError::LegalHoldProposalMissing,
+        );
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::LegalHoldProposalExpiresAt);
+        env.storage()
+            .instance()
+            .remove(&DataKey::LegalHoldClearableAt);
+        env.storage().instance().set(&DataKey::LegalHold, &true);
+
+        let reason = String::from_str(&env, "");
+        LegalHoldChanged {
+            name: symbol_short!("legalhld"),
+            invoice_id: escrow.invoice_id.clone(),
+            active: 1,
+            reason,
+        }
+        .publish(&env);
+        LegalHoldSet {
+            name: symbol_short!("legal_set"),
+            invoice_id: escrow.invoice_id,
+            actor: guardian,
+            timestamp: env.ledger().timestamp(),
+            active: 1,
         }
         .publish(&env);
     }
@@ -6277,9 +6541,9 @@ impl LiquifactEscrow {
     ///
     /// Creates a fresh escrow for a **new invoice** (supplied by caller) with the same
     /// configuration parameters as the template escrow. The template must be in **settled** status
-    /// (status == 2). All immutable configuration (yield_bps, maturity, yield tiers, min contribution,
-    /// max unique investors, max per investor, legal hold clear delay, registry) is copied;
-    /// per-investor state, funding state, and legal holds are **reset** for the new instance.
+    /// (status == 2). All immutable configuration (guardian, yield_bps, maturity, yield tiers, min
+    /// contribution, investor caps, legal hold clear delay, registry) is copied; per-investor state,
+    /// funding state, pending proposals, and active legal holds are **reset** for the new instance.
     ///
     /// # Parameters
     ///
@@ -6296,7 +6560,7 @@ impl LiquifactEscrow {
     /// - `amount, funding_target = new_amount` (caller-supplied).
     /// - `funded_amount = 0, status = 0` (open).
     /// - All per-investor state: cleared (new instance).
-    /// - Immutable configuration (registry, token, treasury, yield tiers, caps, delays) = copied from template.
+    /// - Immutable configuration (guardian, registry, token, treasury, yield tiers, caps, delays) = copied from template.
     ///
     /// # Errors
     ///
@@ -6350,9 +6614,10 @@ impl LiquifactEscrow {
         let funding_deadline: Option<u64> = template_client.get_funding_deadline();
 
         // Call init on the current (target) environment with cloned parameters.
-        Self::init(
+        Self::init_internal(
             env.clone(),
             template_escrow.admin.clone(),
+            template_escrow.guardian.clone(),
             new_invoice_id.clone(),
             template_escrow.sme_address.clone(),
             new_amount,
@@ -6371,6 +6636,7 @@ impl LiquifactEscrow {
             max_per_investor_cap,
             legal_hold_clear_delay,
             funding_deadline,
+            None,
             None,
             None,
             None,
@@ -7609,6 +7875,9 @@ impl LiquifactEscrow {
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::LegalHoldProposalExpiresAt);
 
         AdminTransferredEvent {
             name: symbol_short!("admin"),

@@ -2744,6 +2744,7 @@ fn test_migrate_emits_diagnostic_event_before_error() {
         let escrow = InvoiceEscrow {
             invoice_id: Symbol::new(&env, "TEST04"),
             admin: Address::generate(&env),
+            guardian: None,
             sme_address: Address::generate(&env),
             amount: 1_000i128,
             funding_target: 500i128,
@@ -2777,6 +2778,7 @@ fn test_migrate_diagnostic_event_version_delta() {
         let escrow = InvoiceEscrow {
             invoice_id: Symbol::new(&env, "TEST02"),
             admin: Address::generate(&env),
+                guardian: None,
             sme_address: Address::generate(&env),
             amount: 1_000i128,
             funding_target: 500i128,
