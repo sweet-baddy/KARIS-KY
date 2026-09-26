@@ -2020,6 +2020,61 @@ fn test_208_first_record_on_settled_escrow_is_allowed() {
     }
 }
 
+#[test]
+fn test_resume_dispute_emits_manual_resume_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let contract_id = client.address.clone();
+    let ticket_id = String::from_str(&env, "TICKET-RESUME");
+
+    client.pause_dispute(&ticket_id, &3600u64);
+    client.resume_dispute();
+
+    assert_eq!(
+        env.events().all().events().last().unwrap().clone(),
+        crate::DisputeResumedEvt {
+            name: symbol_short!("disp_res"),
+            invoice_id: client.get_escrow().invoice_id,
+            admin,
+            resumed_by: crate::DisputeResumedBy::Manual,
+            ledger_timestamp: env.ledger().timestamp(),
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+#[test]
+fn test_pause_dispute_duration_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let now = env.ledger().timestamp();
+    client.pause_dispute(
+        &String::from_str(&env, "TICKET-MAX"),
+        &crate::MAX_DISPUTE_PAUSE_DURATION_SECS,
+    );
+    let pause = client.get_dispute_pause().unwrap();
+    assert_eq!(pause.expires_at, now + crate::MAX_DISPUTE_PAUSE_DURATION_SECS);
+
+    assert_contract_error(
+        client.try_pause_dispute(
+            &String::from_str(&env, "TICKET-OVER-MAX"),
+            &(crate::MAX_DISPUTE_PAUSE_DURATION_SECS + 1),
+        ),
+        EscrowError::DisputePauseDurationExceedsMax,
+    );
+    assert_contract_error(
+        client.try_pause_dispute(&String::from_str(&env, "TICKET-ZERO"), &0u64),
+        EscrowError::DisputePauseDurationNotPositive,
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TEST-007: Dispute pause auto-expiry
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2036,6 +2091,8 @@ fn test_208_first_record_on_settled_escrow_is_allowed() {
 /// the expiry, and verify settle succeeds without calling `resume_dispute`.
 #[test]
 fn test_dispute_pause_auto_expire_then_settle() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2063,6 +2120,7 @@ fn test_dispute_pause_auto_expire_then_settle() {
         &None,
         &None,
     );
+    let contract_id = client.address.clone();
 
     // Fund the escrow so settle is available.
     client.fund(&investor, &100_000i128);
@@ -2093,14 +2151,31 @@ fn test_dispute_pause_auto_expire_then_settle() {
     env.ledger().set_timestamp(expiry_ts);
 
     // The pause is no longer active (is_dispute_paused checks now >= expires_at).
+    let event_count_before_read = env.events().all().events().len();
     assert!(
         !client.is_dispute_paused(),
         "dispute pause must be inactive at/after expiry"
     );
+    assert_eq!(env.events().all().events().len(), event_count_before_read);
 
     // Settle must succeed without an explicit resume_dispute call.
     client.settle();
     assert_eq!(client.get_escrow().status, 2); // settled
+
+    let expected_expiry_event = crate::DisputeResumedEvt {
+        name: symbol_short!("disp_res"),
+        invoice_id: client.get_escrow().invoice_id,
+        admin,
+        resumed_by: crate::DisputeResumedBy::AutoExpiry,
+        ledger_timestamp: expiry_ts,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(env
+        .events()
+        .all()
+        .events()
+        .iter()
+        .any(|event| event == &expected_expiry_event));
 }
 
 /// Boundary condition: settle blocked 1 second **before** expiry, succeeds
@@ -2716,6 +2791,7 @@ fn test_migrate_emits_diagnostic_event_before_error() {
         let escrow = InvoiceEscrow {
             invoice_id: Symbol::new(&env, "TEST04"),
             admin: Address::generate(&env),
+            guardian: None,
             sme_address: Address::generate(&env),
             amount: 1_000i128,
             funding_target: 500i128,
@@ -2749,6 +2825,7 @@ fn test_migrate_diagnostic_event_version_delta() {
         let escrow = InvoiceEscrow {
             invoice_id: Symbol::new(&env, "TEST02"),
             admin: Address::generate(&env),
+                guardian: None,
             sme_address: Address::generate(&env),
             amount: 1_000i128,
             funding_target: 500i128,

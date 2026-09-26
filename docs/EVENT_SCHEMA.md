@@ -33,7 +33,7 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 21 event structs.
+The event catalog below lists 24 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -47,6 +47,9 @@ The current contract defines 21 event structs.
 | `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `LegalHoldChanged` | `legalhld` | `set_legal_hold`, `clear_legal_hold` |
+| `DisputePausedEvt` | `disppause` | `pause_dispute` |
+| `DisputeResumedEvt` | `disp_res` | `resume_dispute` |
+| `LegalHoldProposed` | `lh_prop` | `propose_legal_hold` |
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
 | `SmeWithdrew` | `sme_wd` | `withdraw` |
 | `InvestorPayoutClaimed` | `inv_claim` | `claim_investor_payout` |
@@ -259,6 +262,61 @@ Data:
 |---|---|---|
 | `active` | `u32` | `1` = enabled, `0` = cleared |
 
+### `DisputePausedEvt`
+
+Emitted after successful `pause_dispute`. Resumes are reported by
+`DisputeResumedEvt` instead.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `dispute_paused_evt` |
+| 1 | `name` | `Symbol` | `disppause` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type | Values |
+|---|---|---|
+| `ticket_id` | `String` | Dispute ticket reference |
+| `action` | `u32` | `1` = paused |
+| `paused_at` | `u64` | Ledger timestamp when pause began |
+| `expires_at` | `u64` | Configured expiry timestamp |
+
+### `DisputeResumedEvt`
+
+Emitted after successful `resume_dispute`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `dispute_resumed_evt` |
+| 1 | `name` | `Symbol` | `disp_res` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type | Values |
+|---|---|---|
+| `admin` | `Address` | Admin associated with the escrow |
+| `resumed_by` | `DisputeResumedBy` | `Manual` or `AutoExpiry` |
+| `ledger_timestamp` | `u64` | Timestamp when the resume event was emitted |
+
+The first mutating operation to observe an expired pause emits this event with
+`resumed_by = AutoExpiry`. Read-only pause checks do not emit lifecycle events.
+
+### `LegalHoldProposed`
+
+Emitted after the current admin proposes a legal hold that requires guardian
+confirmation. The pending proposal expires one hour after its ledger timestamp.
+
+| Field | Type |
+|---|---|
+| `admin` | `Address` |
+| `expires_at` | `u64` |
+
 ### `CollateralRecordedEvt`
 
 Emitted after successful `record_sme_collateral_commitment`.
@@ -469,6 +527,13 @@ Data:
 | `allowed` | `u32` | `1` = allowed, `0` = blocked |
 
 ## Nested Types
+
+### `DisputeResumedBy`
+
+| Variant | Meaning |
+|---|---|
+| `Manual` | Resume initiated through `resume_dispute` |
+| `AutoExpiry` | Expired pause observed by a mutating operation |
 
 ### `InvoiceEscrow`
 

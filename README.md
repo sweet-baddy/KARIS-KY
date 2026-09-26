@@ -21,7 +21,7 @@ The escrow binds a single funding token at `init` via the `FundingToken` key, so
 See also: [Escrow init parameters](docs/escrow-init-parameters.md).
 
 **How do I perform a legal hold?**
-An admin calls `set_legal_hold` to activate or clear a compliance hold on an escrow, which blocks settlement and payout flows while active. Legal hold is distinct from a dispute pause and is coordinated per the operator runbook.
+Without a configured guardian, the admin calls `set_legal_hold` to activate or clear a compliance hold. With a guardian, the admin calls `propose_legal_hold` and the guardian calls `confirm_legal_hold` to activate; the admin still clears the hold. Legal hold is distinct from a dispute pause and is coordinated per the operator runbook.
 See also: [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md).
 
 **What happens if the admin key is lost?**
@@ -112,7 +112,7 @@ WASM.
 | 6 | Moved per-investor keys to persistent storage to bound instance footprint and decouple per-address TTL | **Redeploy required** — prior instances must be redeployed to pick up new storage locations |
 | 7 | Added `DisputePaused` state for temporary dispute resolution (separate from legal hold) | Additive keys — no `migrate` call required |
 
-> **Current:** `SCHEMA_VERSION = 7`
+> **Current:** `SCHEMA_VERSION = 8`
 
 ---
 
