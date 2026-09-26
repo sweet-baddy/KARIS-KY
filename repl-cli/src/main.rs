@@ -310,6 +310,7 @@ impl ReplContext {
                  get_escrow         — Fetch current escrow state\n\
                  get_version        — Fetch schema version\n\
                  is_dispute_paused  — Check if dispute pause is active\n\
+                 get_legal_hold     — Check if legal hold is active\n\
                  export_state       — Export complete state snapshot\n\
                  help [command]     — Show help for a command\n\
                  quit / exit        — Exit the REPL"

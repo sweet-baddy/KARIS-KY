@@ -96,7 +96,7 @@ mainnet secret in any other environment.
 What **does not** change between environments:
 
 - The WASM artifact (the same compiled binary is deployed to all three).
-- `SCHEMA_VERSION` (7) and `CONTRACT_INTERFACE_VERSION` (2) — both are source-code constants.
+- `SCHEMA_VERSION` (8) and `CONTRACT_INTERFACE_VERSION` (1) — both are source-code constants.
 - The escrow init parameter shape.
 - The deploy script (`scripts/deploy.sh`) and the verifier (`scripts/verify_deployment.sh`).
 

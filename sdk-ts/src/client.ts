@@ -3,7 +3,7 @@
 // Provides a typed client for invoking the LiquifactEscrow Soroban contract.
 // All numeric values use string representation for i128/u64/i64 precision.
 //
-// Schema version: 6
+// Schema version: 8
 // Interface version: 1
 
 import {
@@ -17,6 +17,7 @@ import {
   type FundingCloseSnapshot,
   type SmeCollateralCommitment,
   type EscrowSummary,
+  type InvestorCapStatus,
   type EscrowSnapshot,
   type ErrorDiagnostic,
   type EscrowTemplate,
@@ -283,6 +284,10 @@ export class EscrowClient {
     return this.simulate("get_legal_hold", []);
   }
 
+  async getLegalHoldStatus(): Promise<boolean> {
+    return this.simulate("get_legal_hold_status", []);
+  }
+
   async getContribution(investor: string): Promise<string> {
     return this.simulate("get_contribution", [investor]);
   }
@@ -394,9 +399,47 @@ export class EscrowClient {
       params.max_per_investor,
       params.legal_hold_clear_delay,
       params.funding_deadline,
+      params.max_funding_rate ?? null,
       params.yield_slippage_threshold,
+      params.settlement_notifier_contract ?? null,
+      params.kyc_provider_contract ?? null,
+      params.admin_roles ?? null,
+      params.reject_contract_admin ?? null,
     ];
     return this.invoke("init", args, source);
+  }
+
+  /** Initialize escrow with a distinct legal-hold guardian. Auth: admin. */
+  async initWithGuardian(
+    params: InitParams,
+    guardian: string,
+    source?: string,
+  ): Promise<InvoiceEscrow> {
+    const args = [
+      params.admin,
+      guardian,
+      params.invoice_id,
+      params.sme_address,
+      params.amount,
+      params.yield_bps,
+      params.maturity,
+      params.funding_token,
+      params.registry,
+      params.treasury,
+      params.yield_tiers,
+      params.min_contribution,
+      params.max_unique_investors,
+      params.max_per_investor,
+      params.legal_hold_clear_delay,
+      params.funding_deadline,
+      params.max_funding_rate ?? null,
+      params.yield_slippage_threshold,
+      params.settlement_notifier_contract ?? null,
+      params.kyc_provider_contract ?? null,
+      params.admin_roles ?? null,
+      params.reject_contract_admin ?? null,
+    ];
+    return this.invoke("init_with_guardian", args, source);
   }
 
   /**
@@ -484,6 +527,16 @@ export class EscrowClient {
   /** Set or clear legal hold. Auth: admin. */
   async setLegalHold(active: boolean, source?: string): Promise<void> {
     return this.invoke("set_legal_hold", [active], source);
+  }
+
+  /** Propose a legal hold for guardian confirmation. Auth: current admin. */
+  async proposeLegalHold(admin: string, source?: string): Promise<void> {
+    return this.invoke("propose_legal_hold", [admin], source);
+  }
+
+  /** Confirm a pending legal hold before its one-hour expiry. Auth: guardian. */
+  async confirmLegalHold(guardian: string, source?: string): Promise<void> {
+    return this.invoke("confirm_legal_hold", [guardian], source);
   }
 
   /** Clear legal hold (convenience wrapper). Auth: admin. */

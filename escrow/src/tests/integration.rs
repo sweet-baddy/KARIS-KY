@@ -641,6 +641,7 @@ fn test_collateral_record_event_payload_is_metadata_only() {
             &InvoiceEscrow {
                 invoice_id: invoice_id.clone(),
                 admin,
+                guardian: None,
                 sme_address: sme,
                 amount: 10_000i128,
                 funding_target: 10_000i128,
@@ -698,6 +699,7 @@ fn test_collateral_replacement_event_contains_prior_amount() {
             &InvoiceEscrow {
                 invoice_id: invoice_id.clone(),
                 admin,
+                guardian: None,
                 sme_address: sme,
                 amount: 10_000i128,
                 funding_target: 10_000i128,

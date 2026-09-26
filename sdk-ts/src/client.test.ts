@@ -8,9 +8,17 @@
  * All tests use a stub Stellar SDK to avoid live network connections.
  */
 
-import { EscrowClient, SorobanRpcClient } from "./client";
 import {
   EscrowClient,
+  EscrowStatus,
+  SCHEMA_VERSION,
+  CONTRACT_INTERFACE_VERSION,
+  toBaseUnits,
+  type InvoiceEscrow,
+  type EscrowSummary,
+  type FundingCloseSnapshot,
+  type InitParams,
+  type YieldTier,
   type EscrowEvent,
   type SorobanEventQuery,
   type SorobanRpcClient,
@@ -63,6 +71,7 @@ class StubSorobanClient implements SorobanRpcClient {
     this.responses.set("get_funding_token", "C" + "A".repeat(55)); // Mock token address
     this.responses.set("get_treasury", "C" + "B".repeat(55)); // Mock treasury address
     this.responses.set("get_legal_hold", false);
+    this.responses.set("get_legal_hold_status", false);
     this.responses.set("get_unique_funder_count", 1);
     this.responses.set("get_min_contribution_floor", "100000000"); // 1 unit in base units
   }
@@ -131,7 +140,7 @@ class StubSorobanClient implements SorobanRpcClient {
     }
 
     // Default fallback responses
-    if (functionName === "init") {
+    if (functionName === "init" || functionName === "init_with_guardian") {
       return {
         ...this.createMockEscrow(),
         status: EscrowStatus.Open,
@@ -202,6 +211,7 @@ class StubSorobanClient implements SorobanRpcClient {
     return {
       invoice_id: "INV001",
       admin: "G" + "A".repeat(55),
+      guardian: null,
       sme_address: "G" + "B".repeat(55),
       amount: "100000000000",
       funding_target: "100000000000",
@@ -321,7 +331,9 @@ describe("EscrowClient Integration Tests", () => {
       expect(args[12]).toBe(toBaseUnits("50000", 7)); // max_per_investor: i128
       expect(args[13]).toBe("604800"); // legal_hold_clear_delay: u64
       expect(args[14]).toBe("1700086400"); // funding_deadline: u64
-      expect(args[15]).toBe("50"); // yield_slippage_threshold: i64
+      expect(args[15]).toBeNull(); // max_funding_rate: Option<u64>
+      expect(args[16]).toBe("50"); // yield_slippage_threshold: i64
+      expect(args.slice(17)).toEqual([null, null, null, null]);
 
       // Verify return type
       expect(result).toBeDefined();
@@ -361,6 +373,36 @@ describe("EscrowClient Integration Tests", () => {
       expect(args[12]).toBeNull(); // max_per_investor is null
 
       expect(result).toBeDefined();
+    });
+
+    it("should place the guardian immediately after admin", async () => {
+      const params: InitParams = {
+        admin: ADMIN,
+        invoice_id: "INV003",
+        sme_address: SME,
+        amount: "500000000000",
+        yield_bps: "500",
+        maturity: "0",
+        funding_token: FUNDING_TOKEN,
+        registry: null,
+        treasury: TREASURY,
+        yield_tiers: null,
+        min_contribution: null,
+        max_unique_investors: null,
+        max_per_investor: null,
+        legal_hold_clear_delay: null,
+        funding_deadline: null,
+        yield_slippage_threshold: null,
+      };
+
+      await client.initWithGuardian(params, INVESTOR_1);
+
+      const initCall = stub.getInvocationLog()[0];
+      expect(initCall.functionName).toBe("init_with_guardian");
+      expect(initCall.args[0]).toBe(ADMIN);
+      expect(initCall.args[1]).toBe(INVESTOR_1);
+      expect(initCall.args[2]).toBe("INV003");
+      expect(initCall.args).toHaveLength(22);
     });
   });
 
@@ -702,6 +744,16 @@ describe("EscrowClient Integration Tests", () => {
 
       const log = stub.getInvocationLog();
       expect(log[0].functionName).toBe("get_legal_hold");
+      expect(typeof held).toBe("boolean");
+    });
+
+    it("should retrieve legal hold status from the status entrypoint", async () => {
+      stub.clearInvocationLog();
+
+      const held = await client.getLegalHoldStatus();
+
+      const log = stub.getInvocationLog();
+      expect(log[0].functionName).toBe("get_legal_hold_status");
       expect(typeof held).toBe("boolean");
     });
 

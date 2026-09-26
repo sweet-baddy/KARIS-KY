@@ -64,11 +64,15 @@ Returns the current schema version (`SCHEMA_VERSION`). Returns `0` before `init`
 
 ---
 
-## `get_legal_hold() → bool`
+## `get_legal_hold_status() → bool`
 
 **Storage key:** `DataKey::LegalHold`
 
 Returns `true` when a compliance hold is active. Defaults to `false` when the key is absent.
+This lightweight read-only entrypoint returns only the hold status, without loading the full
+`InvoiceEscrow` snapshot. No authorization is required.
+
+The legacy `get_legal_hold() → bool` entrypoint remains available and returns the same value.
 
 ---
 

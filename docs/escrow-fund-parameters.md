@@ -1,6 +1,6 @@
 # Escrow Fund Parameters — Reference Guide
 
-> **Contract version:** `SCHEMA_VERSION = 7` | `INTERFACE_VERSION = 1`  
+> **Contract version:** `SCHEMA_VERSION = 8` | `INTERFACE_VERSION = 1`
 > **Target audience:** SDK integrators and operators calling `fund` and `fund_with_commitment`
 
 This document describes parameters and behavior for both funding entrypoints:
