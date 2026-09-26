@@ -6,6 +6,7 @@
 //! - `is_dispute_paused`: Check if dispute pause is active
 //! - `get_attestation_log`: Fetch attestation digests
 //! - `export_state`: Export complete state snapshot
+//! - `trace_tier_selection <lock_secs>`: Show which yield tiers a commitment qualifies for
 //!
 //! All output is pretty-printed JSON for easy parsing and display.
 //!
@@ -93,6 +94,8 @@ enum ReplCommand {
     GetAttestationLog,
     /// Export complete state snapshot
     ExportState,
+    /// List each yield tier and whether a commitment of `lock_secs` qualifies for it
+    TraceTierSelection { lock_secs: Result<u64, String> },
     /// Show help
     Help { topic: Option<String> },
     /// Exit REPL
@@ -114,6 +117,15 @@ impl ReplCommand {
                 ReplCommand::GetAttestationLog
             }
             Some("export_state") | Some("export-state") => ReplCommand::ExportState,
+            Some("trace_tier_selection") | Some("trace-tier-selection") => {
+                let lock_secs = match parts.get(1) {
+                    Some(raw) => raw.parse::<u64>().map_err(|_| {
+                        format!("lock_secs must be a whole number of seconds, got '{raw}'")
+                    }),
+                    None => Err("usage: trace_tier_selection <lock_secs>".to_string()),
+                };
+                ReplCommand::TraceTierSelection { lock_secs }
+            }
             Some("help") => {
                 let topic = parts.get(1).map(|s| s.to_string());
                 ReplCommand::Help { topic }
@@ -163,6 +175,9 @@ impl ReplContext {
             ReplCommand::IsDisputePaused => self.cmd_is_dispute_paused().await,
             ReplCommand::GetAttestationLog => self.cmd_get_attestation_log().await,
             ReplCommand::ExportState => self.cmd_export_state().await,
+            ReplCommand::TraceTierSelection { lock_secs } => {
+                self.cmd_trace_tier_selection(lock_secs?)
+            }
             ReplCommand::Help { topic } => Ok(self.cmd_help(topic)),
             ReplCommand::Quit => Err("QUIT".to_string()),
             ReplCommand::Unknown(cmd) => Err(format!(
@@ -238,6 +253,23 @@ impl ReplContext {
         }
     }
 
+    /// List the yield tier table (mock data for demo) with, per tier, whether a
+    /// commitment of `lock_secs` qualifies for it.
+    fn cmd_trace_tier_selection(&self, lock_secs: u64) -> Result<String, String> {
+        if self.mock_mode {
+            Ok(trace_tier_selection(
+                MOCK_BASE_YIELD_BPS,
+                MOCK_YIELD_TIERS,
+                lock_secs,
+            ))
+        } else {
+            Err(
+                "trace_tier_selection not connected to live RPC yet. Use --rpc-url to override."
+                    .to_string(),
+            )
+        }
+    }
+
     /// Simulate export_state (mock data for demo)
     async fn cmd_export_state(&self) -> Result<String, String> {
         if self.mock_mode {
@@ -303,6 +335,13 @@ impl ReplContext {
                      Example: export_state | jq ."
                         .to_string()
                 }
+                "trace_tier_selection" => {
+                    "trace_tier_selection <lock_secs> — List each yield tier and whether a commitment\n\
+                     of <lock_secs> seconds qualifies (lock_secs >= the tier's min_lock_secs;\n\
+                     0 means no commitment, so only the base yield applies)\n\
+                     Example: escrow> trace_tier_selection 7776000"
+                        .to_string()
+                }
                 _ => format!("No help available for '{}'", t),
             },
             None => {
@@ -312,12 +351,43 @@ impl ReplContext {
                  is_dispute_paused  — Check if dispute pause is active\n\
                  get_legal_hold     — Check if legal hold is active\n\
                  export_state       — Export complete state snapshot\n\
+                 trace_tier_selection <lock_secs> — Show which yield tiers qualify\n\
                  help [command]     — Show help for a command\n\
                  quit / exit        — Exit the REPL"
                     .to_string()
             }
         }
     }
+}
+
+/// Base yield of the mock escrow (matches `get_escrow`'s mock `yield_bps`).
+const MOCK_BASE_YIELD_BPS: i64 = 500;
+
+/// Mock yield tier table as `(min_lock_secs, yield_bps)`: 30, 90 and 180 days.
+const MOCK_YIELD_TIERS: &[(u64, i64)] = &[(2_592_000, 550), (7_776_000, 650), (15_552_000, 800)];
+
+/// One line per tier stating whether a commitment of `lock_secs` qualifies for it.
+/// Mirrors the contract's `effective_yield_for_commitment`: a tier qualifies when
+/// `lock_secs >= min_lock_secs`, and a `lock_secs` of 0 is not a commitment, so no
+/// tier qualifies and only the base yield applies.
+fn trace_tier_selection(base_yield_bps: i64, tiers: &[(u64, i64)], lock_secs: u64) -> String {
+    let mut out = format!("lock_secs {lock_secs}, base yield {base_yield_bps} bps\n");
+    if tiers.is_empty() {
+        out.push_str("no yield tier table: base yield applies\n");
+        return out;
+    }
+    for (i, (min_lock_secs, yield_bps)) in tiers.iter().enumerate() {
+        let qualifies = lock_secs > 0 && lock_secs >= *min_lock_secs;
+        out.push_str(&format!(
+            "tier {i}: min_lock_secs {min_lock_secs}, yield {yield_bps} bps: {}\n",
+            if qualifies {
+                "qualifies"
+            } else {
+                "does not qualify"
+            }
+        ));
+    }
+    out
 }
 
 #[tokio::main]
@@ -361,5 +431,58 @@ async fn main() {
             }
             Err(_) => break,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TIERS: &[(u64, i64)] = &[(100, 550), (200, 650)];
+
+    #[test]
+    fn trace_lists_every_tier_with_its_qualification() {
+        assert_eq!(
+            trace_tier_selection(500, TIERS, 150),
+            "lock_secs 150, base yield 500 bps\n\
+             tier 0: min_lock_secs 100, yield 550 bps: qualifies\n\
+             tier 1: min_lock_secs 200, yield 650 bps: does not qualify\n"
+        );
+    }
+
+    #[test]
+    fn a_lock_equal_to_min_lock_secs_qualifies() {
+        assert!(trace_tier_selection(500, TIERS, 200)
+            .contains("tier 1: min_lock_secs 200, yield 650 bps: qualifies"));
+    }
+
+    #[test]
+    fn zero_lock_secs_qualifies_for_no_tier() {
+        let trace = trace_tier_selection(500, TIERS, 0);
+        assert!(!trace.contains(": qualifies"), "{trace}");
+    }
+
+    #[test]
+    fn missing_tier_table_says_base_yield_applies() {
+        assert_eq!(
+            trace_tier_selection(500, &[], 300),
+            "lock_secs 300, base yield 500 bps\nno yield tier table: base yield applies\n"
+        );
+    }
+
+    #[test]
+    fn parse_reads_lock_secs_and_rejects_bad_input() {
+        assert!(matches!(
+            ReplCommand::parse("trace_tier_selection 42"),
+            ReplCommand::TraceTierSelection { lock_secs: Ok(42) }
+        ));
+        assert!(matches!(
+            ReplCommand::parse("trace-tier-selection abc"),
+            ReplCommand::TraceTierSelection { lock_secs: Err(_) }
+        ));
+        assert!(matches!(
+            ReplCommand::parse("trace_tier_selection"),
+            ReplCommand::TraceTierSelection { lock_secs: Err(_) }
+        ));
     }
 }
