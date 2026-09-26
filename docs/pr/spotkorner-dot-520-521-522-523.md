@@ -1,6 +1,6 @@
 ## Summary
 
-Adds the tier-vs-base yield tests from #520 (one scope item). This PR implements that single instruction; #521 is referenced but not implemented here.
+Adds the tier-vs-base yield tests from #520 (one scope item). This PR implements that single instruction; #521, #522 and #523 are referenced but not implemented here.
 
 ## Important: `main` does not compile
 
@@ -24,9 +24,19 @@ Not done in this PR:
 
 Not done in this PR: `InvestorYieldInfo`, the entrypoint, the SDK wrapper, tests, docs.
 
+## #522 Prevent basic `fund` from overwriting an investor's existing tier
+
+Not done in this PR: the guard in `fund`, error code, tests.
+
+## #523 Document yield slippage behaviour for over-funded escrows
+
+Not done in this PR: the documentation.
+
 ## Notes
 
 sweet-baddy/KARIS-KY#632 (misrasamuelisiguzor-oss) adds `mod tier_table;` at the same spot in `escrow/src/tests.rs`; if both merge, keep both lines.
 
 Closes #520
 Closes #521
+Closes #522
+Closes #523
