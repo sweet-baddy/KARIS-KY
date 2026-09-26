@@ -466,7 +466,7 @@ pub enum EscrowError {
     DisputePauseDurationNotPositive = 169,
     /// [`LiquifactEscrow::pause_dispute`] received a pause duration exceeding the maximum allowed window.
     /// See [`MAX_DISPUTE_PAUSE_DURATION_SECS`] for the upper bound.
-    DisputePauseDurationExceedsMax = 181,
+    DisputePauseDurationExceedsMax = 206,
     /// [`LiquifactEscrow::pause_dispute`] received an empty dispute ticket reference.
     DisputeTicketIdEmpty = 170,
     /// [`LiquifactEscrow::resume_dispute`] called when no dispute pause is active.
@@ -7789,6 +7789,7 @@ impl LiquifactEscrow {
     /// # Errors
     /// - [`EscrowError::DisputeTicketIdEmpty`] — `ticket_id` is empty.
     /// - [`EscrowError::DisputePauseDurationNotPositive`] — `duration_secs <= 0`.
+    /// - [`EscrowError::DisputePauseDurationExceedsMax`] — `duration_secs` exceeds the maximum.
     /// - [`EscrowError::LedgerTimestampOverflow`] — computing expiration timestamp overflows.
     pub fn pause_dispute(env: Env, ticket_id: String, duration_secs: u64) {
         ensure(

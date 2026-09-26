@@ -146,6 +146,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 201 | `ImportAlreadyInitialized` | `import_state` | `DataKey::Escrow` already exists (target not fresh) | Import only onto freshly deployed contract | typed |
 | 202 | `ImportSchemaMismatch` | `import_state` | `snapshot.schema_version != SCHEMA_VERSION` | Export from contract running same SCHEMA_VERSION | typed |
 | 203 | `ImportChecksumMismatch` | `import_state` | recomputed checksum differs from snapshot checksum | State was tampered with; verify export file | typed |
+| 206 | `DisputePauseDurationExceedsMax` | `pause_dispute` | `duration_secs > MAX_DISPUTE_PAUSE_DURATION_SECS` | Choose a duration within the maximum pause window | typed |
 
 ### Legacy panic strings (migration aid)
 

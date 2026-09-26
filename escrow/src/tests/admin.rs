@@ -2020,6 +2020,34 @@ fn test_208_first_record_on_settled_escrow_is_allowed() {
     }
 }
 
+#[test]
+fn test_pause_dispute_duration_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let now = env.ledger().timestamp();
+    client.pause_dispute(
+        &String::from_str(&env, "TICKET-MAX"),
+        &crate::MAX_DISPUTE_PAUSE_DURATION_SECS,
+    );
+    let pause = client.get_dispute_pause().unwrap();
+    assert_eq!(pause.expires_at, now + crate::MAX_DISPUTE_PAUSE_DURATION_SECS);
+
+    assert_contract_error(
+        client.try_pause_dispute(
+            &String::from_str(&env, "TICKET-OVER-MAX"),
+            &(crate::MAX_DISPUTE_PAUSE_DURATION_SECS + 1),
+        ),
+        EscrowError::DisputePauseDurationExceedsMax,
+    );
+    assert_contract_error(
+        client.try_pause_dispute(&String::from_str(&env, "TICKET-ZERO"), &0u64),
+        EscrowError::DisputePauseDurationNotPositive,
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TEST-007: Dispute pause auto-expiry
 // ─────────────────────────────────────────────────────────────────────────────
