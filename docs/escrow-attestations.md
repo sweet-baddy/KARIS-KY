@@ -1,11 +1,11 @@
 # Escrow Attestations: KYC/KYB Operational Flows
 
-This document describes how the three attestation entrypoints on the karis-ky escrow contract
+This document describes how the attestation entrypoints on the karis-ky escrow contract
 are used in KYC (Know Your Customer) and KYB (Know Your Business) compliance workflows.
 
 ## What this is — and what it is not
 
-Both entrypoints store a **32-byte digest** (e.g. SHA-256 of an IPFS CID or a document bundle
+The write entrypoints store a **32-byte digest** (e.g. SHA-256 of an IPFS CID or a document bundle
 hash) on-chain. This is a **chain anchor**: a tamper-evident pointer that lets any observer
 confirm that a specific document set existed at a specific ledger sequence.
 
@@ -22,12 +22,13 @@ independently and recompute the hash to confirm the anchor matches.
 
 ## Entrypoints
 
-### `bind_primary_attestation_hash(digest: BytesN<32>)`
+### `bind_primary_attestation_hash(digest: Bytes)`
 
 | Property | Value |
 |---|---|
 | Auth | `InvoiceEscrow::admin` |
 | Write policy | **Single-set** — panics if already bound |
+| Validation | `digest` must be exactly 32 bytes; otherwise returns `EscrowError::InvalidAttestationHashLength` (code 52) |
 | Storage key | `DataKey::PrimaryAttestationHash` |
 | Event | `AttestationBoundEvt` (new) and `PrimaryAttestationBound` (legacy) |
 
@@ -291,7 +292,7 @@ durable storage as an independent audit record.
   safely assume that once `AttestationDigestRevoked` is observed, it is final.
 
 - **Out-of-range rejection:** revoking a non-existent index panics with `"attestation index
-  out of range"`. The admin must read `get_attestation_append_log` to determine valid indices.
+   out of range"`. The admin can read `get_attestation_log` to determine valid indices.
 
 - **Token economics:** attestation entrypoints do not interact with token balances, funding
   state, or settlement flows. They are metadata-only. See
@@ -304,7 +305,7 @@ durable storage as an independent audit record.
 
 ## Test coverage
 
-Attestation behavior is covered in [`escrow/src/test/attestations.rs`](../escrow/src/test/attestations.rs):
+Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escrow/src/tests/attestations.rs):
 
 | Test | What it proves |
 |---|---|
@@ -317,6 +318,9 @@ Attestation behavior is covered in [`escrow/src/test/attestations.rs`](../escrow
 | `test_append_single_entry_stored` | Single append stored at index 0 |
 | `test_append_multiple_entries_ordered` | Insertion order preserved |
 | `test_append_exactly_max_entries_succeeds` | 32nd entry succeeds (boundary inclusive) |
+| `test_get_attestation_log_empty` | Dedicated getter returns an empty log before any append |
+| `test_get_attestation_log_partial` | Dedicated getter returns partial logs in insertion order |
+| `test_get_attestation_log_full` | Dedicated getter returns all 32 entries |
 | `test_append_beyond_max_panics` | 33rd entry panics |
 | `test_append_duplicate_digest_allowed` | Duplicate digests accepted |
 | `test_append_non_admin_panics` | Non-admin append is rejected |

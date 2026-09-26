@@ -66,7 +66,7 @@ This test ensures that the primary attestation hash—used as a compliance ancho
 4. Observe the error returned/panic thrown
 
 **Expected behavior:**
-- ❌ Function panics or returns error code `50` (`PrimaryAttestationAlreadyBound`)
+- ❌ Function panics or returns error code `53` (`AttestationHashAlreadyBound`)
 - ❌ Storage remains unchanged (still contains `digest_1`)
 - ❌ No event is emitted on failure
 - ❌ Second call completely fails before any write occurs
@@ -84,7 +84,7 @@ This test ensures that the primary attestation hash—used as a compliance ancho
 3. Observe the error returned/panic thrown
 
 **Expected behavior:**
-- ❌ Function panics or returns error code `50` (`PrimaryAttestationAlreadyBound`)
+- ❌ Function panics or returns error code `53` (`AttestationHashAlreadyBound`)
 - ❌ No event is emitted on second attempt
 - ❌ Rejection is **not** based on digest equality (same digest still fails)
 - ❌ This differs from idempotent patterns; second call always fails
@@ -308,7 +308,7 @@ This test ensures that the primary attestation hash—used as a compliance ancho
 #### AC-6: Immutability Guarantee
 - [ ] Storage key guard check: `!has(&DataKey::PrimaryAttestationHash)` verified ✅
 - [ ] Second binding attempt triggers guard before any write ✅
-- [ ] Error code `50` message: `"PrimaryAttestationAlreadyBound"` ✅
+- [ ] Error code `53` message: `"AttestationHashAlreadyBound"` ✅
 - [ ] Invariant I-5 is preserved ✅
 
 ### Integration Requirements (Should Pass)
@@ -336,7 +336,7 @@ This test ensures that the primary attestation hash—used as a compliance ancho
 ### Error Case Coverage (Must Reject)
 
 #### AC-11: Error Codes
-- [ ] Error code `50`: `PrimaryAttestationAlreadyBound` — second bind attempt ✅
+- [ ] Error code `53`: `AttestationHashAlreadyBound` — second bind attempt ✅
 - [ ] Error code `52`: `InvalidAttestationHashLength` — wrong digest size ✅
 - [ ] Error code `4` (assumed): Authorization failure — non-admin caller ✅
 - [ ] All errors are typed (not opaque panics) ✅

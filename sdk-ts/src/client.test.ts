@@ -1120,3 +1120,19 @@ test("appendAttestationDigest passes rate-limit errors through unchanged", async
 
   await expect(client.appendAttestationDigest(new Uint8Array(32))).rejects.toBe(rateLimitError);
 });
+
+test("reads attestation log as hex-encoded digests", async () => {
+  const digests = ["ab".repeat(32), "cd".repeat(32)];
+  const rpc: SorobanRpcClient = {
+    invoke: jest.fn(),
+    simulate: jest.fn().mockResolvedValue(digests),
+    getLedger: jest.fn(),
+  };
+  const client = new EscrowClient(
+    { rpcUrl: "http://localhost", networkPassphrase: "test", contractId: "CESCROW" },
+    rpc,
+  );
+
+  await expect(client.getAttestationLog()).resolves.toEqual(digests);
+  expect(rpc.simulate).toHaveBeenCalledWith("CESCROW", "get_attestation_log", []);
+});

@@ -112,7 +112,7 @@ fn typed_error_codes_cover_allowlist_attestation_and_dust_guards() {
     client.bind_primary_attestation_hash(&digest);
     assert_contract_error(
         client.try_bind_primary_attestation_hash(&digest),
-        EscrowError::PrimaryAttestationAlreadyBound,
+        EscrowError::AttestationHashAlreadyBound,
     );
 
     assert_contract_error(
@@ -159,6 +159,7 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::SweepExceedsLiabilityFloor, 42),
         (EscrowError::PrimaryAttestationAlreadyBound, 50),
         (EscrowError::AttestationAppendLogCapacityReached, 51),
+        (EscrowError::AttestationHashAlreadyBound, 53),
         (EscrowError::CollateralAmountNotPositive, 60),
         (EscrowError::CollateralAssetEmpty, 61),
         (EscrowError::CollateralTimestampBackwards, 62),

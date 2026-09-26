@@ -371,6 +371,7 @@
     { "name": "get_sme_collateral_commitment", "description": "Read SME collateral metadata (null when never recorded)", "returns": { "type": "Option<SmeCollateralCommitment>" } },
     { "name": "get_primary_attestation_hash", "description": "Read primary attestation digest (null when unset)", "returns": { "type": "Option<BytesN<32>>" } },
     { "name": "get_attestation_append_log", "description": "Read attestation audit log (empty array when unset)", "returns": { "type": "Vec<BytesN<32>>" } },
+    { "name": "get_attestation_log", "description": "Read all attestation digests in insertion order (empty array when unset)", "returns": { "type": "Vec<BytesN<32>>" } },
     { "name": "get_template", "description": "Read a template by name; returns null when unknown", "params": [{ "name": "name", "type": "String" }], "returns": { "type": "Option<EscrowTemplate>" } },
     { "name": "has_maturity_lock", "description": "Check if escrow has a configured maturity time lock", "returns": { "type": "bool" } }
   ],
@@ -527,6 +528,7 @@
       "42": "SweepExceedsLiabilityFloor",
       "50": "PrimaryAttestationAlreadyBound",
       "51": "AttestationAppendLogCapacityReached",
+      "53": "AttestationHashAlreadyBound",
       "60": "CollateralAmountNotPositive",
       "61": "CollateralAssetEmpty",
       "62": "CollateralTimestampBackwards",

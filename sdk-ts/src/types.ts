@@ -232,9 +232,10 @@ export enum EscrowErrorCode {
   RecipientBalanceDeltaMismatch = 41,
   SweepExceedsLiabilityFloor = 42,
 
-  // Attestation (50–51)
+  // Attestation (50–53)
   PrimaryAttestationAlreadyBound = 50,
   AttestationAppendLogCapacityReached = 51,
+  AttestationHashAlreadyBound = 53,
 
   // SME collateral (60–62)
   CollateralAmountNotPositive = 60,

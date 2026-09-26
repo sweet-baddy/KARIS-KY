@@ -354,6 +354,10 @@ export class EscrowClient {
     return this.simulate("get_attestation_append_log", []);
   }
 
+  async getAttestationLog(): Promise<string[]> {
+    return this.simulate("get_attestation_log", []);
+  }
+
   async getTemplate(name: string): Promise<EscrowTemplate | null> {
     return this.simulate("get_template", [name]);
   }

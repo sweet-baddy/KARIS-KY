@@ -4,6 +4,7 @@
 //! - `get_escrow`: Fetch current escrow state
 //! - `get_version`: Fetch schema version
 //! - `is_dispute_paused`: Check if dispute pause is active
+//! - `get_attestation_log`: Fetch attestation digests
 //! - `export_state`: Export complete state snapshot
 //!
 //! All output is pretty-printed JSON for easy parsing and display.
@@ -88,8 +89,8 @@ enum ReplCommand {
     GetVersion,
     /// Check if dispute pause is active
     IsDisputePaused,
-    /// Check if legal hold is active
-    GetLegalHold,
+    /// Fetch attestation digests
+    GetAttestationLog,
     /// Export complete state snapshot
     ExportState,
     /// Show help
@@ -109,7 +110,9 @@ impl ReplCommand {
             Some("get_escrow") | Some("get-escrow") => ReplCommand::GetEscrow,
             Some("get_version") | Some("get-version") => ReplCommand::GetVersion,
             Some("is_dispute_paused") | Some("is-dispute-paused") => ReplCommand::IsDisputePaused,
-            Some("get_legal_hold") | Some("get-legal-hold") => ReplCommand::GetLegalHold,
+            Some("get_attestation_log") | Some("get-attestation-log") => {
+                ReplCommand::GetAttestationLog
+            }
             Some("export_state") | Some("export-state") => ReplCommand::ExportState,
             Some("help") => {
                 let topic = parts.get(1).map(|s| s.to_string());
@@ -158,7 +161,7 @@ impl ReplContext {
             ReplCommand::GetEscrow => self.cmd_get_escrow().await,
             ReplCommand::GetVersion => self.cmd_get_version().await,
             ReplCommand::IsDisputePaused => self.cmd_is_dispute_paused().await,
-            ReplCommand::GetLegalHold => self.cmd_get_legal_hold().await,
+            ReplCommand::GetAttestationLog => self.cmd_get_attestation_log().await,
             ReplCommand::ExportState => self.cmd_export_state().await,
             ReplCommand::Help { topic } => Ok(self.cmd_help(topic)),
             ReplCommand::Quit => Err("QUIT".to_string()),
@@ -225,13 +228,13 @@ impl ReplContext {
         }
     }
 
-    /// Simulate get_legal_hold (mock data for demo)
-    async fn cmd_get_legal_hold(&self) -> Result<String, String> {
+    /// Simulate get_attestation_log (mock data for demo)
+    async fn cmd_get_attestation_log(&self) -> Result<String, String> {
         if self.mock_mode {
-            let mock_data = json!({ "legal_hold_status": false });
-            Ok(serde_json::to_string_pretty(&mock_data).unwrap())
+            Ok(serde_json::to_string_pretty(&json!([])).unwrap())
         } else {
-            Err("get_legal_hold not connected to live RPC yet. Use --rpc-url to override.".to_string())
+            Err("get_attestation_log not connected to live RPC yet. Use --rpc-url to override."
+                .to_string())
         }
     }
 
@@ -288,10 +291,10 @@ impl ReplContext {
                      Example: is_dispute_paused"
                         .to_string()
                 }
-                "get_legal_hold" => {
-                    "get_legal_hold — Check if legal hold is active\n\
-                     Returns: legal_hold_status\n\
-                     Example: get_legal_hold"
+                "get_attestation_log" => {
+                    "get_attestation_log — Fetch attestation digests in insertion order\n\
+                     Returns: JSON array of 32-byte digests encoded as hex\n\
+                     Example: escrow> get_attestation_log"
                         .to_string()
                 }
                 "export_state" => {
