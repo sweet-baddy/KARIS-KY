@@ -1372,7 +1372,7 @@ pub struct LegalHoldProposed {
     pub expires_at: u64,
 }
 
-/// Emitted when a dispute pause is activated or resumed on an escrow.
+/// Emitted when a dispute pause is activated on an escrow.
 ///
 /// Dispute pause is separate from legal hold and is used for temporary resolution
 /// of invoice disputes (e.g., validity challenges). The escrow is frozen until either
@@ -1382,9 +1382,9 @@ pub struct LegalHoldProposed {
 /// - `name`: Hardcoded symbol (e.g., `dispute_pause` or `disp_pause`).
 /// - `invoice_id`: Symbol representation of the invoice.
 /// - `ticket_id`: Support/dispute ticket reference for audit trail.
-/// - `action`: `1` = paused, `0` = resumed.
+/// - `action`: `1` = paused.
 /// - `paused_at`: Ledger timestamp when pause was activated.
-/// - `expires_at`: Ledger timestamp when pause auto-expires (or 0 if manually resumed).
+/// - `expires_at`: Ledger timestamp when the pause is configured to auto-expire.
 #[contractevent]
 pub struct DisputePausedEvt {
     #[topic]
@@ -1396,6 +1396,26 @@ pub struct DisputePausedEvt {
     pub action: u32,
     pub paused_at: u64,
     pub expires_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum DisputeResumedBy {
+    Manual,
+    AutoExpiry,
+}
+
+/// Emitted when an administrator manually resumes a dispute pause, or when an
+/// expired pause is first observed by a mutating operation.
+#[contractevent]
+pub struct DisputeResumedEvt {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub admin: Address,
+    pub resumed_by: DisputeResumedBy,
+    pub ledger_timestamp: u64,
 }
 
 /// SME collateral commitment metadata recorded.
@@ -4177,7 +4197,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::is_dispute_paused_for_mutation(&env),
             EscrowError::DisputePausedBlocksInvestorClaims,
         );
 
@@ -5721,7 +5741,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::is_dispute_paused_for_mutation(&env),
             EscrowError::DisputePausedBlocksFunding,
         );
         ensure(
@@ -6289,7 +6309,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::is_dispute_paused_for_mutation(&env),
             EscrowError::DisputePausedBlocksSettlement,
         );
 
@@ -6688,7 +6708,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::is_dispute_paused_for_mutation(&env),
             EscrowError::DisputePausedBlocksWithdrawal,
         );
 
@@ -6793,7 +6813,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::is_dispute_paused_for_mutation(&env),
             EscrowError::DisputePausedBlocksInvestorClaims,
         );
 
@@ -7032,7 +7052,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::is_dispute_paused_for_mutation(&env),
             EscrowError::DisputePausedBlocksInvestorClaims,
         );
 
@@ -7144,7 +7164,7 @@ impl LiquifactEscrow {
         );
         ensure(
             &env,
-            !Self::is_dispute_paused(&env),
+            !Self::is_dispute_paused_for_mutation(&env),
             EscrowError::DisputePausedBlocksInvestorClaims,
         );
 
@@ -8130,18 +8150,16 @@ impl LiquifactEscrow {
 
         ensure(&env, pause_state.is_some(), EscrowError::NoPauseActive);
 
-        let state = pause_state.unwrap();
         let now = env.ledger().timestamp();
 
         env.storage().instance().remove(&DataKey::DisputePaused);
 
-        DisputePausedEvt {
-            name: symbol_short!("disppause"),
+        DisputeResumedEvt {
+            name: symbol_short!("disp_res"),
             invoice_id: escrow.invoice_id.clone(),
-            ticket_id: state.ticket_id,
-            action: 0, // 0 = resumed
-            paused_at: state.paused_at_ledger_timestamp,
-            expires_at: now, // Use current time to signal manual resumption
+            admin: escrow.admin,
+            resumed_by: DisputeResumedBy::Manual,
+            ledger_timestamp: now,
         }
         .publish(&env);
     }
@@ -8150,7 +8168,8 @@ impl LiquifactEscrow {
     ///
     /// Includes auto-expiration logic: if the pause was configured to expire and
     /// current ledger time has reached/exceeded the expiration, the pause is
-    /// considered inactive (although the storage entry is not automatically cleaned).
+    /// considered inactive. A mutating operation later removes the stored entry
+    /// and emits `DisputeResumedEvt` once; this check remains read-only.
     ///
     /// # Returns
     /// `true` if a dispute pause exists and has not auto-expired; `false` otherwise.
@@ -8165,6 +8184,33 @@ impl LiquifactEscrow {
         } else {
             false
         }
+    }
+
+    /// Expire a stored pause once, on the first guarded mutation after its deadline.
+    /// The public read path remains side-effect free.
+    fn is_dispute_paused_for_mutation(env: &Env) -> bool {
+        let pause_state: Option<DisputePauseState> =
+            env.storage().instance().get(&DataKey::DisputePaused);
+
+        if let Some(state) = pause_state {
+            let now = env.ledger().timestamp();
+            if now < state.expires_at_ledger_timestamp {
+                return true;
+            }
+
+            env.storage().instance().remove(&DataKey::DisputePaused);
+            let escrow = Self::get_escrow(env.clone());
+            DisputeResumedEvt {
+                name: symbol_short!("disp_res"),
+                invoice_id: escrow.invoice_id,
+                admin: escrow.admin,
+                resumed_by: DisputeResumedBy::AutoExpiry,
+                ledger_timestamp: now,
+            }
+            .publish(env);
+        }
+
+        false
     }
 
     /// Get the current dispute pause state, if active.
