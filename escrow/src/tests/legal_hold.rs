@@ -180,6 +180,33 @@ fn init_settled<'a>(
     (client, escrow_id, token, treasury)
 }
 
+#[test]
+fn legal_hold_status_is_false_when_key_is_unset() {
+    let env = Env::default();
+    let client = super::deploy(&env);
+
+    assert!(!client.get_legal_hold_status());
+}
+
+#[test]
+fn legal_hold_status_is_false_when_hold_is_inactive() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "LHSTATUS01");
+
+    assert!(!client.get_legal_hold_status());
+}
+
+#[test]
+fn legal_hold_status_is_true_when_hold_is_active() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "LHSTATUS02");
+    client.set_legal_hold(&true, &String::from_str(&env, "compliance"));
+
+    assert!(client.get_legal_hold_status());
+}
+
 // ── 1. fund ──────────────────────────────────────────────────────────────────
 
 #[test]

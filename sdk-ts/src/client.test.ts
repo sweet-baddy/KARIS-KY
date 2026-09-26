@@ -63,6 +63,7 @@ class StubSorobanClient implements SorobanRpcClient {
     this.responses.set("get_funding_token", "C" + "A".repeat(55)); // Mock token address
     this.responses.set("get_treasury", "C" + "B".repeat(55)); // Mock treasury address
     this.responses.set("get_legal_hold", false);
+    this.responses.set("get_legal_hold_status", false);
     this.responses.set("get_unique_funder_count", 1);
     this.responses.set("get_min_contribution_floor", "100000000"); // 1 unit in base units
   }
@@ -702,6 +703,16 @@ describe("EscrowClient Integration Tests", () => {
 
       const log = stub.getInvocationLog();
       expect(log[0].functionName).toBe("get_legal_hold");
+      expect(typeof held).toBe("boolean");
+    });
+
+    it("should retrieve legal hold status from the status entrypoint", async () => {
+      stub.clearInvocationLog();
+
+      const held = await client.getLegalHoldStatus();
+
+      const log = stub.getInvocationLog();
+      expect(log[0].functionName).toBe("get_legal_hold_status");
       expect(typeof held).toBe("boolean");
     });
 

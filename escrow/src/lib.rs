@@ -3093,6 +3093,11 @@ impl LiquifactEscrow {
         Self::legal_hold_active(&env)
     }
 
+    /// Whether a compliance/legal hold is active (defaults to `false` if unset).
+    pub fn get_legal_hold_status(env: Env) -> bool {
+        Self::legal_hold_active(&env)
+    }
+
     /// Returns the reason for the current legal hold, if any.
     /// Absent when no hold is active or the hold was set without a reason.
     pub fn get_legal_hold_reason(env: Env) -> Option<String> {

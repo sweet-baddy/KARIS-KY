@@ -8,6 +8,7 @@ Interactive REPL (read-eval-print loop) CLI for inspecting karis-ky escrow contr
 - `get_escrow` — Fetch current escrow state
 - `get_version` — Fetch contract schema version  
 - `is_dispute_paused` — Check if dispute pause is active
+- `get_legal_hold` — Check if legal hold is active
 - `export_state` — Export complete state snapshot for backup or migration
 
 **Output format:** Pretty-printed JSON for easy parsing and display.
@@ -129,6 +130,22 @@ escrow> is_dispute_paused
   "pause_ticket_id": null,
   "paused_at": null,
   "resumes_at": null
+}
+```
+
+### `get_legal_hold`
+
+Check whether a compliance/legal hold is active using the read-only `get_legal_hold_status`
+contract entrypoint.
+
+```
+escrow> get_legal_hold
+```
+
+**Output:**
+```json
+{
+  "legal_hold_status": false
 }
 ```
 

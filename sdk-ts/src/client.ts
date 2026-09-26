@@ -283,6 +283,10 @@ export class EscrowClient {
     return this.simulate("get_legal_hold", []);
   }
 
+  async getLegalHoldStatus(): Promise<boolean> {
+    return this.simulate("get_legal_hold_status", []);
+  }
+
   async getContribution(investor: string): Promise<string> {
     return this.simulate("get_contribution", [investor]);
   }
