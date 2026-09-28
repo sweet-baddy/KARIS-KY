@@ -48,5 +48,4 @@ export {
   type EscrowEventSubscriptionOptions,
   type CheckEscrowHealth,
   type EscrowHealth,
-  type InvestorCapStatus,
 } from "./types";
