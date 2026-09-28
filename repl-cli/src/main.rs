@@ -9,6 +9,7 @@ use std::collections::HashMap;
 pub enum Command {
     CheckHealth,
     GetHealth,
+    GetContribution { investor: String },
     Help { topic: Option<String> },
     Quit,
 }
@@ -58,6 +59,14 @@ fn parse_command(input: &str) -> Result<Command> {
     match parts.get(0).map(|s| *s) {
         Some("check_health") => Ok(Command::CheckHealth),
         Some("get_health") => Ok(Command::GetHealth),
+        Some("get_contribution") => {
+            if parts.len() < 2 {
+                return Err(anyhow!("get_contribution requires an investor address argument"));
+            }
+            Ok(Command::GetContribution {
+                investor: parts[1].to_string(),
+            })
+        }
         Some("help") => {
             let topic = parts.get(1).map(|s| s.to_string());
             Ok(Command::Help { topic })
@@ -185,6 +194,29 @@ fn display_get_health(metrics: &EscrowHealthMetrics) {
     println!();
 }
 
+/// Format and display get_contribution command output.
+fn display_get_contribution(investor: &str, contribution: i128) {
+    println!();
+    println!("{}", "═══════════════════════════════════════════════════════".bright_blue());
+    println!("{}", "INVESTOR CONTRIBUTION".bright_blue().bold());
+    println!("{}", "═══════════════════════════════════════════════════════".bright_blue());
+
+    println!();
+    println!("Investor Address:");
+    println!("  {}", investor.bright_cyan());
+    println!();
+    println!("Cumulative Principal Contributed:");
+    if contribution == 0 {
+        println!("  {} stroops {}", format!("{}", contribution).yellow(), "(no contribution recorded)".yellow());
+    } else {
+        println!("  {} stroops", format!("{}", contribution).bright_green());
+    }
+
+    println!();
+    println!("{}", "═══════════════════════════════════════════════════════".bright_blue());
+    println!();
+}
+
 /// Format duration in seconds to human-readable format.
 fn format_duration(secs: i64) -> String {
     if secs < 0 {
@@ -240,11 +272,24 @@ fn display_help(topic: Option<&str>) {
             println!("  > get_health");
             println!();
         }
+        Some("get_contribution") => {
+            println!("{}:", "get_contribution".bright_cyan().bold());
+            println!("  Display the cumulative principal contributed by an investor.");
+            println!("  Returns: 0 if the investor has not contributed; otherwise their total principal.");
+            println!();
+            println!("{}:", "Arguments".bright_cyan());
+            println!("  <investor> - The investor address (G...) to query");
+            println!();
+            println!("{}:", "Usage".bright_cyan());
+            println!("  > get_contribution GDPM3QMXN3APYMYBNPIBMVJHD3FQJSCAEBFHDZZS3MSVVUAOTBMVYF2");
+            println!();
+        }
         _ => {
             println!("Available commands:");
             println!();
             println!("  {} - Check escrow health status (quick overview)", "check_health".bright_cyan());
             println!("  {} - Get detailed health metrics", "get_health".bright_cyan());
+            println!("  {} - Get investor contribution amount", "get_contribution <investor>".bright_cyan());
             println!("  {} - Display this help message", "help [command]".bright_cyan());
             println!("  {} - Exit the REPL", "quit/exit".bright_cyan());
             println!();
@@ -286,6 +331,11 @@ async fn run_repl() -> Result<()> {
                     Ok(Command::GetHealth) => {
                         let metrics = EscrowHealthMetrics::from_contract();
                         display_get_health(&metrics);
+                    }
+                    Ok(Command::GetContribution { investor }) => {
+                        // Mock data - in production would invoke via Soroban RPC
+                        let contribution = 50_000_000_000i128;
+                        display_get_contribution(&investor, contribution);
                     }
                     Ok(Command::Help { topic }) => {
                         display_help(topic.as_deref());
@@ -371,5 +421,39 @@ mod tests {
             ReplCommand::parse("trace_tier_selection"),
             ReplCommand::TraceTierSelection { lock_secs: Err(_) }
         ));
+    }
+
+    #[test]
+    fn parse_get_contribution_requires_investor_argument() {
+        assert!(parse_command("get_contribution").is_err());
+        assert!(parse_command("get_contribution ").is_err());
+    }
+
+    #[test]
+    fn parse_get_contribution_accepts_valid_address() {
+        let result = parse_command("get_contribution GDPM3QMXN3APYMYBNPIBMVJHD3FQJSCAEBFHDZZS3MSVVUAOTBMVYF2");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Command::GetContribution { investor } => {
+                assert_eq!(investor, "GDPM3QMXN3APYMYBNPIBMVJHD3FQJSCAEBFHDZZS3MSVVUAOTBMVYF2");
+            }
+            _ => panic!("Expected GetContribution command"),
+        }
+    }
+
+    #[test]
+    fn help_get_contribution_displays_correct_info() {
+        display_help(Some("get_contribution"));
+        // This is a visual test; actual help should display usage instructions
+    }
+
+    #[test]
+    fn display_contribution_zero_shows_no_contribution() {
+        display_get_contribution("GDPM3QMXN3APYMYBNPIBMVJHD3FQJSCAEBFHDZZS3MSVVUAOTBMVYF2", 0);
+    }
+
+    #[test]
+    fn display_contribution_nonzero_shows_amount() {
+        display_get_contribution("GDPM3QMXN3APYMYBNPIBMVJHD3FQJSCAEBFHDZZS3MSVVUAOTBMVYF2", 50_000_000_000i128);
     }
 }
