@@ -106,6 +106,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 90 | `MigrationVersionMismatch` | `migrate` | stored version `!= from_version` | Pass matching `from_version` | typed |
 | 91 | `AlreadyCurrentSchemaVersion` | `migrate` | `from_version >= SCHEMA_VERSION` | No migration needed | typed |
 | 92 | `NoMigrationPath` | `migrate` | `from_version < SCHEMA_VERSION` and no transform implemented | Redeploy or extend `migrate` | typed |
+| 93 | `MigrationAlreadyApplied` | `migrate` | Migration already applied to this instance; replay detected | Verify on-chain version; check migration nonce | typed |
 | 100 | `FundingAmountNotPositive` | `fund`, `fund_with_commitment` | `amount <= 0` | Pass positive funding amount | typed |
 | 101 | `FundingBelowMinContribution` | `fund`, `fund_with_commitment` | `amount < min_contribution` | Increase deposit to meet floor | typed |
 | 102 | `LegalHoldBlocksFunding` | `fund`, `fund_with_commitment` | legal hold active | Complete legal-hold clear workflow | typed |
@@ -211,6 +212,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 90 | `from_version does not match stored version` |
 | 91 | `Already at current schema version` |
 | 92 | `No migration path from version 0 - extend migrate or redeploy` |
+| 93 | `Migration has already been applied to this instance` |
 | 100 | `Funding amount must be positive` |
 | 101 | `funding amount below min_contribution floor` |
 | 102 | `Legal hold blocks new funding while active` |

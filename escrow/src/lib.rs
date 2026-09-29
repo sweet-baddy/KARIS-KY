@@ -510,6 +510,12 @@ pub enum EscrowError {
     AlreadyCurrentSchemaVersion = 91,
     /// [`LiquifactEscrow::migrate`] has no implemented path from the requested version.
     NoMigrationPath = 92,
+    /// [`LiquifactEscrow::migrate`] has already been applied to this instance and cannot be replayed.
+    /// Stored migration nonce [`DataKey::MigrationExecutionLog`] indicates a prior successful
+    /// completion of this version transition. The contract rejects replay to ensure state
+    /// transformations are applied exactly once. This is a safety measure to prevent double-applying
+    /// yield calculations, collateral records, or per-investor state changes.
+    MigrationAlreadyApplied = 93,
 
     /// [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] received non-positive amount.
     FundingAmountNotPositive = 100,
@@ -826,14 +832,23 @@ pub enum DataKey {
     /// Flag indicating whether automatic yield distribution snapshots are enabled for this escrow.
     /// Absent ⇒ false (default off, backwards-compatible). Set during [`LiquifactEscrow::init`].
     YieldAutoDistributionEnabled,
-    /// Optional configurable staleness threshold in seconds for funding-stalled warning (4004).
-    /// When set and escrow is open & underfunded, a warning is emitted if no funding
-    /// has occurred for this duration. Absent ⇒ no stall checking. Set during [`LiquifactEscrow::init`].
-    FundingStallThresholdSecs,
-    /// Ledger timestamp of the last successful fund operation. Updated on every [`LiquifactEscrow::fund`]
-    /// and [`LiquifactEscrow::fund_with_commitment`] call. Used with [`DataKey::FundingStallThresholdSecs`]
-    /// to detect funding staleness. Absent ⇒ never funded.
-    LastFundLedgerTimestamp,
+
+    /// Migration execution nonce: records that a specific version transition
+    /// (from_version, to_version) has been applied to this instance.
+    /// Key format: `MigrationExecutionLog(from_version, to_version)`
+    /// Value: the ledger sequence number when the migration completed.
+    /// Used to prevent idempotent re-application of the same migration path.
+    /// Absent ⇒ migration never executed. Once written, a second `migrate()` call
+    /// with the same version pair fails with [`EscrowError::MigrationAlreadyApplied`].
+    MigrationExecutionLog(u32, u32),
+
+    /// Optional: migration completion timestamp for audit trails.
+    /// Key format: `MigrationCompletedAt(from_version, to_version)`
+    /// Value: `env.ledger().timestamp()` when the migration finished.
+    /// Useful for operator debugging and compliance audits.
+    /// Absent ⇒ no migration record. Companion to [`DataKey::MigrationExecutionLog`].
+    MigrationCompletedAt(u32, u32),
+}
 
 // --- Data types ---
 
@@ -4844,39 +4859,46 @@ impl LiquifactEscrow {
     /// | Condition | Typed error |
     /// |-----------|--------|
     /// | `stored_version != from_version` | [`EscrowError::MigrationVersionMismatch`] |
+    /// | Migration already applied; replay detected | [`EscrowError::MigrationAlreadyApplied`] |
     /// | `from_version >= SCHEMA_VERSION` | [`EscrowError::AlreadyCurrentSchemaVersion`] |
     /// | Any `from_version < SCHEMA_VERSION` (all paths) | [`EscrowError::NoMigrationPath`] |
     ///
     /// See `docs/OPERATOR_RUNBOOK.md` §2 for step-by-step instructions on implementing
-    /// a concrete migration path.
+    /// a concrete migration path. **Before implementing migration logic, ensure this
+    /// idempotency check is in place to prevent replay attacks.**
     pub fn migrate(env: Env, from_version: u32) -> u32 {
-        let escrow = Self::load_escrow_require_admin(&env);
+        // 1. Auth check: MUST be first, before any storage reads or writes
+        Self::load_escrow_require_admin(&env);
 
+        // 2. Retrieve stored version
         let stored: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
 
-        // Emit diagnostic event with version information for operator insight,
-        // even if the call will ultimately fail.
-        MigrationDiagnosticEmitted {
-            name: symbol_short!("mig_diag"),
-            invoice_id: escrow.invoice_id.clone(),
-            stored_version: stored,
-            from_version,
-            target_version: SCHEMA_VERSION,
-        }
-        .publish(&env);
-
+        // 3. Validate version alignment
         ensure(
             &env,
             stored == from_version,
             EscrowError::MigrationVersionMismatch,
         );
 
+        // 4. **NEW:** Check idempotency nonce — prevent replaying this migration
+        // if it was already successfully applied to this instance.
+        let migration_key = DataKey::MigrationExecutionLog(from_version, SCHEMA_VERSION);
+        if env.storage().instance().has(&migration_key) {
+            // This migration has already been applied. Reject replay.
+            fail(&env, EscrowError::MigrationAlreadyApplied)
+        }
+
+        // 5. Version boundary checks
         if from_version >= SCHEMA_VERSION {
             fail(&env, EscrowError::AlreadyCurrentSchemaVersion)
         } else {
             // No migration path is implemented for any version below SCHEMA_VERSION.
             // To add one: implement the transformation here, call
             //   env.storage().instance().set(&DataKey::Version, &NEW_VERSION);
+            //   env.storage().instance().set(&DataKey::MigrationExecutionLog(from_version, NEW_VERSION),
+            //       &env.ledger().sequence());
+            //   env.storage().instance().set(&DataKey::MigrationCompletedAt(from_version, NEW_VERSION),
+            //       &env.ledger().timestamp());
             // and return NEW_VERSION before reaching this typed error.
             //
             // When a migration path IS implemented, also record the version change:

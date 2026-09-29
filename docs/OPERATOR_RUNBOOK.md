@@ -160,12 +160,58 @@ This table must match the `migrate` rustdoc in `escrow/src/lib.rs`.
 | Condition | Typed error |
 |-----------|-------------|
 | `stored_version != from_version` | `EscrowError::MigrationVersionMismatch` |
+| Migration already applied; replay detected | `EscrowError::MigrationAlreadyApplied` |
 | `from_version >= SCHEMA_VERSION` | `EscrowError::AlreadyCurrentSchemaVersion` |
 | Any `from_version < SCHEMA_VERSION` without an implemented migration branch | `EscrowError::NoMigrationPath` |
 
 Because Soroban aborts the transaction on contract panic, these errors perform
 no storage writes in the current release. Operators must not call `migrate()` as
 a bookkeeping step after additive upgrades.
+
+### Migration idempotency and replay protection
+
+**Starting from schema version 7**, the `migrate()` entrypoint enforces idempotency via a
+stored nonce [`DataKey::MigrationExecutionLog`]:
+
+- After a successful migration, a nonce is written to prevent re-application of the same
+  version transition to the same instance.
+- If you call `migrate(from_version)` twice, the second call fails with 
+  [`EscrowError::MigrationAlreadyApplied`] (code 93).
+- This is a safety measure to prevent double-application of state transformations
+  (e.g., yield recalculations, per-investor claim locks, collateral audits).
+
+**Operator action:** Do not retry a `migrate()` call if you receive error code 93. Instead:
+
+1. Verify the on-chain version with `get_version()`.
+2. If it matches your target, the migration succeeded.
+3. If it does not, investigate the first call's failure reason and contact governance.
+
+**Developer action:** When implementing a migration path (v6 → v7, etc.):
+
+```rust
+if from_version == 6 && SCHEMA_VERSION == 7 {
+    // 1. Perform state transformation
+    // ... your migration logic ...
+    
+    // 2. Write new version (must be last state write)
+    env.storage().instance().set(&DataKey::Version, &7u32);
+    
+    // 3. Write idempotency nonce in same transaction (prevents replay)
+    env.storage().instance().set(
+        &DataKey::MigrationExecutionLog(6, 7),
+        &env.ledger().sequence(),
+    );
+    
+    // 4. Optional: Record completion timestamp for audit trails
+    env.storage().instance().set(
+        &DataKey::MigrationCompletedAt(6, 7),
+        &env.ledger().timestamp(),
+    );
+    
+    // 5. Return new version
+    return 7;
+}
+```
 
 ---
 

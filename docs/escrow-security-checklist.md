@@ -30,7 +30,7 @@ Every state-mutating entrypoint and the identity required to authorize it.
 | `claim_investor_payout` | `investor` (caller-supplied) | `investor.require_auth()` | `status == 2`; contribution > 0; claim-lock gate |
 | `sweep_terminal_dust` | `treasury` | `treasury.require_auth()` | `status == 2 or 3`; amount ≤ `MAX_DUST_SWEEP_AMOUNT` |
 | `verify_asset_custody` | `escrow.admin` | `escrow.admin.require_auth()` | Admin-triggered reconciliation check; suitable for manual audits or external schedulers |
-| `migrate` | **none** | *(no `require_auth`)* | **Always panics** on all current paths — safe now, dangerous if logic is added without adding an auth guard (see §5.1) |
+| `migrate` | `escrow.admin` (via `load_escrow_require_admin`) | `Self::load_escrow_require_admin(&env)` before version checks | Pre-emptive guard; all current paths panic; idempotency nonce prevents replay |
 
 ### Read-only entrypoints
 
@@ -177,9 +177,18 @@ This creates a window where `funded_amount` > actual token balance (unfunded com
 
 ## 5. Assumptions and Risks
 
-### 5.1 `migrate()` has no auth guard
+### 5.1 `migrate()` Authorization and Idempotency Guards
 
-`migrate` performs no `require_auth()` check. In the current implementation every code path panics before any storage write, so there is no exploitable consequence. **If a future developer adds migration logic before the panic branches, the function becomes callable by any account.** Before implementing a migration path, add `escrow.admin.require_auth()` as the first statement.
+**Starting from schema version 7:**
+
+- **Authorization guard:** `migrate()` calls `Self::load_escrow_require_admin(&env)` as the first statement, before any version checks or storage reads.
+- **Idempotency nonce:** After a successful migration, a [`DataKey::MigrationExecutionLog`] entry is written to prevent replaying the same version transition.
+
+The migration entrypoint is now guarded against both unauthorized access and replay attacks. This is critical when migration logic adds state transformations (yield calculations, per-investor records, collateral audits). Replaying these transformations twice would corrupt accounting.
+
+**For developers implementing migration paths:** Ensure the nonce is written **after** state transformation but **before** returning. See `docs/OPERATOR_RUNBOOK.md` §2 for the template.
+
+**For operators:** If you call `migrate(from_version)` and receive error code 93 (`MigrationAlreadyApplied`), verify the on-chain version with `get_version()`. If it matches your target, the migration succeeded — do not retry.
 
 ### 5.2 Accounting-custody decoupling
 
