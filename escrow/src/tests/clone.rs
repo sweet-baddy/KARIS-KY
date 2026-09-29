@@ -191,6 +191,60 @@ fn test_clone_settled_escrow_zero_amount() {
     assert!(result.is_err(), "clone should fail with zero amount");
 }
 
+/// Clone fails when template escrow has zero funding target.
+#[test]
+fn test_clone_settled_escrow_zero_funding_target() {
+    let env = Env::default();
+
+    let (template_client, _, _) = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    template_client.init(
+        &admin,
+        &String::from_str(&env, "TEMPLATE"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &template_client.funding_token(),
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = Address::generate(&env);
+    template_client.fund(&investor, &TARGET);
+    template_client.settle();
+
+    // Fabricate template with zero funding target directly in storage
+    env.as_contract(&template_client.address, || {
+        let mut escrow = env
+            .storage()
+            .instance()
+            .get::<crate::DataKey, crate::InvoiceEscrow>(&crate::DataKey::Escrow)
+            .unwrap();
+        escrow.funding_target = 0i128;
+        env.storage()
+            .instance()
+            .set(&crate::DataKey::Escrow, &escrow);
+    });
+
+    let target_id = env.register(LiquifactEscrow, ());
+    let target_client = super::LiquifactEscrowClient::new(&env, &target_id);
+
+    let result =
+        target_client.try_clone_settled_escrow(&env, &String::from_str(&env, "ZERO_TGT"), &100_000i128);
+
+    assert!(result.is_err(), "clone should fail when template has zero funding target");
+}
+
 /// Original template escrow is not modified after clone.
 #[test]
 fn test_clone_settled_escrow_template_unchanged() {
