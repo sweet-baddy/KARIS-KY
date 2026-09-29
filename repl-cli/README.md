@@ -137,6 +137,31 @@ repl-cli> help check_health
 repl-cli> help get_health
 ```
 
+### `fund_with_commitment`
+
+**Purpose**: Test and simulate first-time investor contribution with commitment lock and view selected yield tier.
+
+**Arguments**:
+- `<investor>` - The investor address (Stellar format)
+- `<amount>` - Principal contribution in stroops
+- `<lock_secs>` - Lock duration in seconds
+
+**Usage**:
+```
+repl-cli> fund_with_commitment GDPM3QMXN3APYMYBNPIBMVJHD3FQJSCAEBFHDZZS3MSVVUAOTBMVYF2 50000000 86400
+{
+  "status": "success",
+  "investor": "GDPM3QMXN3APYMYBNPIBMVJHD3FQJSCAEBFHDZZS3MSVVUAOTBMVYF2",
+  "amount": 50000000,
+  "lock_secs": 86400,
+  "yield_tier_selected": {
+    "tier_index": 1,
+    "effective_yield_bps": 650
+  },
+  "claim_not_before": 1700086400
+}
+```
+
 ### `quit` / `exit`
 
 **Purpose**: Exit the REPL CLI.

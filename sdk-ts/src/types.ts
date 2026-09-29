@@ -43,7 +43,28 @@ export interface InvoiceEscrow {
   maturity: string; // u64 → bigint string
   status: EscrowStatus;
   guardian: string | null;
+  unique_funder_count?: number;
 }
+
+/** Summary statistics of funding progress and investor participation. */
+export interface FundingStats {
+  funded_amount: string;
+  funding_target: string;
+  unique_funder_count: number;
+  status: EscrowStatus;
+}
+
+/** Settlement event payload emitted at settlement. */
+export interface SettledEvent {
+  invoice_id: string;
+  funded_amount: string;
+  yield_bps: number;
+  maturity: number;
+  settled_at_ledger_timestamp: number;
+}
+
+/** Alias for SettledEvent */
+export type SettledEvt = SettledEvent;
 
 /** One step in the optional tiered yield ladder. Immutable after init. */
 export interface YieldTier {

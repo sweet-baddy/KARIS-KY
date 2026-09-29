@@ -675,6 +675,12 @@ pub enum EscrowError {
     LegalHoldAlreadyActive = 212,
     /// The configured legal-hold guardian must be distinct from the escrow admin.
     LegalHoldGuardianSameAsAdmin = 213,
+    /// [`LiquifactEscrow::clone_settled_escrow`] template escrow is not in settled status.
+    CloneNotSettled = 214,
+    /// [`LiquifactEscrow::clone_settled_escrow`] non-positive clone amount.
+    CloneAmountNotPositive = 215,
+    /// Template or initial funding target is invalid (not positive).
+    InvalidFundingTarget = 216,
 }
 
 #[inline(always)]
@@ -874,6 +880,16 @@ pub struct InvoiceEscrow {
     /// 0 = open, 1 = funded, 2 = settled, 3 = withdrawn (SME pulled liquidity), 4 = cancelled (admin-gated; investors may refund), 5 = archived (admin-gated; read-only terminal)
     pub status: u32,
     pub guardian: Option<Address>,
+}
+
+/// Summary statistics of funding progress and investor participation.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FundingStats {
+    pub funded_amount: i128,
+    pub funding_target: i128,
+    pub unique_funder_count: u32,
+    pub status: u32,
 }
 
 /// SME-reported collateral metadata for off-chain risk review.
@@ -3114,6 +3130,18 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::Escrow)
             .unwrap_or_else(|| fail(&env, EscrowError::EscrowNotInitialized))
+    }
+
+    /// Returns funding statistics including unique funder count in a single read.
+    pub fn get_funding_stats(env: Env) -> FundingStats {
+        let escrow = Self::get_escrow(env.clone());
+        let unique_funder_count = Self::get_unique_funder_count(env);
+        FundingStats {
+            funded_amount: escrow.funded_amount,
+            funding_target: escrow.funding_target,
+            unique_funder_count,
+            status: escrow.status,
+        }
     }
 
     /// Rotate the beneficiary (SME) address that receives liquidity on
