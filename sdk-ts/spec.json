@@ -16,7 +16,7 @@
       "auth": "admin",
       "params": [
         { "name": "admin", "type": "Address", "description": "Governance address; controls holds, maturity, admin transfer" },
-        { "name": "invoice_id", "type": "String", "description": "ASCII alphanumeric + underscore, max 32 chars (e.g. 'INV001')" },
+        { "name": "invoice_id", "type": "String", "description": "ASCII alphanumeric + underscore only; 1..=32 bytes, max 32 chars (e.g. 'INV001')" },
         { "name": "sme_address", "type": "Address", "description": "Invoice issuer; authorized to call settle and withdraw" },
         { "name": "amount", "type": "i128", "description": "Funding target in token base units (7 decimals)" },
         { "name": "yield_bps", "type": "i64", "description": "Base annualized yield in basis points (800 = 8%); range 0..=10_000" },
@@ -472,7 +472,7 @@
   "constants": {
     "SCHEMA_VERSION": { "value": 6, "type": "u32", "description": "Current on-chain storage schema version" },
     "CONTRACT_INTERFACE_VERSION": { "value": 1, "type": "u32", "description": "Public entrypoint ABI surface version" },
-    "MAX_INVOICE_ID_STRING_LEN": { "value": 32, "type": "u32", "description": "Max UTF-8 byte length for invoice_id string" },
+    "MAX_INVOICE_ID_STRING_LEN": { "value": 32, "type": "u32", "description": "Max UTF-8 byte length for invoice_id string; must be 1..=32 ASCII characters from [A-Za-z0-9_]" },
     "MAX_ATTESTATION_APPEND_ENTRIES": { "value": 32, "type": "u32", "description": "Max attestation append log entries" },
     "MAX_INVESTOR_ALLOWLIST_BATCH": { "value": 32, "type": "u32", "description": "Max allowlist batch mutation size" },
     "MAX_FUND_BATCH": { "value": 50, "type": "u32", "description": "Max fund_batch entries per call" },

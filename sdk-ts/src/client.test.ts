@@ -13,6 +13,7 @@ import {
   EscrowStatus,
   SCHEMA_VERSION,
   CONTRACT_INTERFACE_VERSION,
+  MAX_INVOICE_ID_STRING_LEN,
   toBaseUnits,
   type InvoiceEscrow,
   type EscrowSummary,
@@ -373,6 +374,47 @@ describe("EscrowClient Integration Tests", () => {
       expect(args[12]).toBeNull(); // max_per_investor is null
 
       expect(result).toBeDefined();
+    });
+
+    it("should reject invoice ids longer than the maximum before invoking the network", async () => {
+      const boundaryId = "A".repeat(MAX_INVOICE_ID_STRING_LEN);
+      const tooLongId = "A".repeat(MAX_INVOICE_ID_STRING_LEN + 1);
+
+      const validParams: InitParams = {
+        admin: ADMIN,
+        invoice_id: boundaryId,
+        sme_address: SME,
+        amount: toBaseUnits("1000", 7),
+        yield_bps: "800",
+        maturity: "0",
+        funding_token: FUNDING_TOKEN,
+        registry: null,
+        treasury: TREASURY,
+        yield_tiers: null,
+        min_contribution: null,
+        max_unique_investors: null,
+        max_per_investor: null,
+        legal_hold_clear_delay: null,
+        funding_deadline: null,
+        yield_slippage_threshold: null,
+      };
+
+      await expect(client.init(validParams)).resolves.toBeDefined();
+      expect(stub.getInvocationLog()).toHaveLength(1);
+
+      stub.clearInvocationLog();
+
+      const invalidParams: InitParams = {
+        ...validParams,
+        invoice_id: tooLongId,
+      };
+
+      await expect(client.init(invalidParams)).rejects.toThrow(
+        new ValidationError(
+          `invoice_id must be 1..=${MAX_INVOICE_ID_STRING_LEN} ASCII characters [A-Za-z0-9_] and cannot exceed ${MAX_INVOICE_ID_STRING_LEN} bytes`,
+        ).message,
+      );
+      expect(stub.getInvocationLog()).toHaveLength(0);
     });
 
     it("should place the guardian immediately after admin", async () => {

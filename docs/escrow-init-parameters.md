@@ -50,10 +50,12 @@ and funding cancellation.
 
 An ASCII identifier for the invoice, stored as a Soroban `Symbol`.
 
+The canonical contract limit is `MAX_INVOICE_ID_STRING_LEN = 32`.
+
 | Aspect | Detail |
 |--------|--------|
-| **Charset** | `[A-Za-z0-9_]` only. No spaces, hyphens, or special characters. |
-| **Length** | 1–32 bytes (validated at `MAX_INVOICE_ID_STRING_LEN`). |
+| **Charset** | `[A-Za-z0-9_]` only — uppercase/lowercase ASCII letters, digits, and underscores. No spaces, hyphens, periods, or special characters. |
+| **Length** | 1–32 bytes inclusive (`1..=MAX_INVOICE_ID_STRING_LEN`). |
 | **Examples** | `INV001`, `INVOICE_2026_Q3`, `SUPPLIER_A_REF42` |
 | **Validation errors** | Code 4 (`InvoiceIdInvalidLength`), Code 5 (`InvoiceIdInvalidCharset`) |
 | **Gas impact** | Validation is O(n) on string length; negligible for 32 bytes. |

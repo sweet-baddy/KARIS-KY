@@ -28,7 +28,6 @@ import {
   type EscrowEventSubscriptionOptions,
   type CheckEscrowHealth,
   type EscrowHealth,
-  type InvestorCapStatus,
   SCHEMA_VERSION,
   CONTRACT_INTERFACE_VERSION,
   MAX_INVOICE_ID_STRING_LEN,
@@ -80,6 +79,27 @@ export class ValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ValidationError";
+  }
+}
+
+function assertValidInvoiceId(invoiceId: string): void {
+  if (typeof invoiceId !== "string") {
+    throw new ValidationError(
+      `invoice_id must be a string of 1..=${MAX_INVOICE_ID_STRING_LEN} ASCII characters [A-Za-z0-9_]`,
+    );
+  }
+
+  const utf8ByteLength = new TextEncoder().encode(invoiceId).length;
+  if (invoiceId.length === 0 || utf8ByteLength > MAX_INVOICE_ID_STRING_LEN) {
+    throw new ValidationError(
+      `invoice_id must be 1..=${MAX_INVOICE_ID_STRING_LEN} ASCII characters [A-Za-z0-9_] and cannot exceed ${MAX_INVOICE_ID_STRING_LEN} bytes`,
+    );
+  }
+
+  if (!/^[A-Za-z0-9_]+$/.test(invoiceId)) {
+    throw new ValidationError(
+      `invoice_id must use only ASCII letters, digits, and underscores; received: ${invoiceId}`,
+    );
   }
 }
 
@@ -413,6 +433,8 @@ export class EscrowClient {
 
   /** Initialize escrow. One-shot; panics on duplicate. Auth: admin. */
   async init(params: InitParams, source?: string): Promise<InvoiceEscrow> {
+    assertValidInvoiceId(params.invoice_id);
+
     const args = [
       params.admin,
       params.invoice_id,
@@ -445,6 +467,8 @@ export class EscrowClient {
     guardian: string,
     source?: string,
   ): Promise<InvoiceEscrow> {
+    assertValidInvoiceId(params.invoice_id);
+
     const args = [
       params.admin,
       guardian,
@@ -664,6 +688,7 @@ export class EscrowClient {
     registry: string | null,
     source?: string,
   ): Promise<InvoiceEscrow> {
+    assertValidInvoiceId(invoiceId);
     return this.invoke("init_from_template", [
       admin, templateName, invoiceId, smeAddress,
       amount, fundingToken, treasury, registry,
