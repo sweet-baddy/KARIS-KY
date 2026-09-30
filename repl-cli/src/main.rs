@@ -10,6 +10,7 @@ pub enum Command {
     CheckHealth,
     GetHealth,
     GetContribution { investor: String },
+    FundWithCommitment { investor: String, amount: i128, lock_secs: u64 },
     Help { topic: Option<String> },
     Quit,
 }
@@ -66,6 +67,15 @@ fn parse_command(input: &str) -> Result<Command> {
             Ok(Command::GetContribution {
                 investor: parts[1].to_string(),
             })
+        }
+        Some("fund_with_commitment") => {
+            if parts.len() < 4 {
+                return Err(anyhow!("fund_with_commitment requires <investor> <amount> <lock_secs> arguments"));
+            }
+            let investor = parts[1].to_string();
+            let amount: i128 = parts[2].parse().map_err(|_| anyhow!("Invalid amount: must be an integer"))?;
+            let lock_secs: u64 = parts[3].parse().map_err(|_| anyhow!("Invalid lock_secs: must be a positive integer"))?;
+            Ok(Command::FundWithCommitment { investor, amount, lock_secs })
         }
         Some("help") => {
             let topic = parts.get(1).map(|s| s.to_string());
@@ -284,12 +294,27 @@ fn display_help(topic: Option<&str>) {
             println!("  > get_contribution GDPM3QMXN3APYMYBNPIBMVJHD3FQJSCAEBFHDZZS3MSVVUAOTBMVYF2");
             println!();
         }
+        Some("fund_with_commitment") => {
+            println!("{}:", "fund_with_commitment".bright_cyan().bold());
+            println!("  Record a first-time investor contribution with commitment lock and select yield tier.");
+            println!("  Returns: JSON output with selected yield tier and claim-not-before timestamp.");
+            println!();
+            println!("{}:", "Arguments".bright_cyan());
+            println!("  <investor>  - The investor address (G...)");
+            println!("  <amount>    - The amount to fund (in stroops)");
+            println!("  <lock_secs> - The commitment lock duration in seconds");
+            println!();
+            println!("{}:", "Usage".bright_cyan());
+            println!("  > fund_with_commitment GDPM3QMXN3APYMYBNPIBMVJHD3FQJSCAEBFHDZZS3MSVVUAOTBMVYF2 50000000 86400");
+            println!();
+        }
         _ => {
             println!("Available commands:");
             println!();
             println!("  {} - Check escrow health status (quick overview)", "check_health".bright_cyan());
             println!("  {} - Get detailed health metrics", "get_health".bright_cyan());
             println!("  {} - Get investor contribution amount", "get_contribution <investor>".bright_cyan());
+            println!("  {} - Record deposit with commitment lock", "fund_with_commitment <investor> <amount> <lock_secs>".bright_cyan());
             println!("  {} - Display this help message", "help [command]".bright_cyan());
             println!("  {} - Exit the REPL", "quit/exit".bright_cyan());
             println!();
@@ -336,6 +361,23 @@ async fn run_repl() -> Result<()> {
                         // Mock data - in production would invoke via Soroban RPC
                         let contribution = 50_000_000_000i128;
                         display_get_contribution(&investor, contribution);
+                    }
+                    Ok(Command::FundWithCommitment { investor, amount, lock_secs }) => {
+                        let eff_yield = if lock_secs >= 200 { 650 } else if lock_secs >= 100 { 550 } else { 500 };
+                        let tier_idx = if lock_secs >= 200 { 1 } else if lock_secs >= 100 { 0 } else { -1 };
+                        let claim_nb = if lock_secs > 0 { 1700000000u64 + lock_secs } else { 0u64 };
+                        let out = json!({
+                            "status": "success",
+                            "investor": investor,
+                            "amount": amount,
+                            "lock_secs": lock_secs,
+                            "yield_tier_selected": {
+                                "tier_index": tier_idx,
+                                "effective_yield_bps": eff_yield
+                            },
+                            "claim_not_before": claim_nb
+                        });
+                        println!("{}", serde_json::to_string_pretty(&out)?);
                     }
                     Ok(Command::Help { topic }) => {
                         display_help(topic.as_deref());

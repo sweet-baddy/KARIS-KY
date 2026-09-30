@@ -882,6 +882,16 @@ pub struct InvoiceEscrow {
     pub guardian: Option<Address>,
 }
 
+/// Summary statistics of funding progress and investor participation.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FundingStats {
+    pub funded_amount: i128,
+    pub funding_target: i128,
+    pub unique_funder_count: u32,
+    pub status: u32,
+}
+
 /// SME-reported collateral metadata for off-chain risk review.
 ///
 /// **Record-only:** this struct is stored for transparency and indexing. It does **not**
@@ -3120,6 +3130,18 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::Escrow)
             .unwrap_or_else(|| fail(&env, EscrowError::EscrowNotInitialized))
+    }
+
+    /// Returns funding statistics including unique funder count in a single read.
+    pub fn get_funding_stats(env: Env) -> FundingStats {
+        let escrow = Self::get_escrow(env.clone());
+        let unique_funder_count = Self::get_unique_funder_count(env);
+        FundingStats {
+            funded_amount: escrow.funded_amount,
+            funding_target: escrow.funding_target,
+            unique_funder_count,
+            status: escrow.status,
+        }
     }
 
     /// Rotate the beneficiary (SME) address that receives liquidity on
