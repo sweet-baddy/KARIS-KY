@@ -675,6 +675,12 @@ pub enum EscrowError {
     LegalHoldAlreadyActive = 212,
     /// The configured legal-hold guardian must be distinct from the escrow admin.
     LegalHoldGuardianSameAsAdmin = 213,
+    /// [`LiquifactEscrow::clone_settled_escrow`] template escrow is not in settled status.
+    CloneNotSettled = 214,
+    /// [`LiquifactEscrow::clone_settled_escrow`] non-positive clone amount.
+    CloneAmountNotPositive = 215,
+    /// Template or initial funding target is invalid (not positive).
+    InvalidFundingTarget = 216,
 }
 
 #[inline(always)]
@@ -6228,7 +6234,17 @@ impl LiquifactEscrow {
             template_escrow.status == 2,
             EscrowError::CloneNotSettled,
         );
+        ensure(
+            &env,
+            template_escrow.funding_target > 0,
+            EscrowError::InvalidFundingTarget,
+        );
         ensure(&env, new_amount > 0, EscrowError::CloneAmountNotPositive);
+        ensure(
+            &env,
+            !env.storage().instance().has(&DataKey::Escrow),
+            EscrowError::EscrowAlreadyInitialized,
+        );
 
         // Require auth from the template admin.
         template_escrow.admin.require_auth();
