@@ -5305,6 +5305,34 @@ impl LiquifactEscrow {
         escrow
     }
 
+    /// Checks and atomically updates UniqueFunderCount if this is a new investor (prev == 0).
+    /// Enforces max_unique_investors cap atomically before incrementing.
+    pub(crate) fn check_and_increment_funder_count(env: &Env, prev: i128) {
+        if prev == 0 {
+            let cur_funder_count: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::UniqueFunderCount)
+                .unwrap_or(0);
+
+            if let Some(cap) = env
+                .storage()
+                .instance()
+                .get::<DataKey, u32>(&DataKey::MaxUniqueInvestorsCap)
+            {
+                ensure(
+                    env,
+                    cur_funder_count < cap,
+                    EscrowError::UniqueInvestorCapReached,
+                );
+            }
+
+            env.storage()
+                .instance()
+                .set(&DataKey::UniqueFunderCount, &(cur_funder_count + 1));
+        }
+    }
+
     fn fund_impl(
         env: Env,
         investor: Address,
@@ -5456,31 +5484,7 @@ impl LiquifactEscrow {
             );
         }
 
-        // Hoist UniqueFunderCount read: used for both the cap assertion (below) and the
-        // increment write (after contribution is recorded). A single read covers both uses,
-        // eliminating one storage read on every new-investor funding call.
-        let cur_funder_count: u32 = if prev == 0 {
-            env.storage()
-                .instance()
-                .get(&DataKey::UniqueFunderCount)
-                .unwrap_or(0)
-        } else {
-            0 // prev != 0: count is not needed; skip the read entirely.
-        };
-
-        if prev == 0 {
-            if let Some(cap) = env
-                .storage()
-                .instance()
-                .get::<DataKey, u32>(&DataKey::MaxUniqueInvestorsCap)
-            {
-                ensure(
-                    &env,
-                    cur_funder_count < cap,
-                    EscrowError::UniqueInvestorCapReached,
-                );
-            }
-        }
+        Self::check_and_increment_funder_count(&env, prev);
 
         // Capture the effective yield and tier lock threshold in locals so event fields can
         // be populated without post-write storage reads.
@@ -5690,10 +5694,6 @@ impl LiquifactEscrow {
         }
 
         if prev == 0 {
-            // Use the hoisted cur_funder_count; no second storage read needed.
-            env.storage()
-                .instance()
-                .set(&DataKey::UniqueFunderCount, &(cur_funder_count + 1));
             // Maintain ordered investor index for list_investors pagination.
             // Read InvestorCount (may differ from UniqueFunderCount on pre-v6 instances
             // that did not initialize it; default to 0 so the first index is always 0).

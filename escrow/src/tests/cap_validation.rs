@@ -1519,3 +1519,47 @@ fn test_investor_cap_status_after_cap_lowering() {
     assert_eq!(status.remaining, 0);
     assert_eq!(status.is_full, true);
 }
+
+#[test]
+fn test_unique_investors_cap_boundary_with_fund_with_commitment() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_COMMIT"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(2u32), // cap = 2 investors
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let inv3 = Address::generate(&env);
+
+    // First investor funds with commitment
+    client.fund_with_commitment(&inv1, &10_000_000_000i128, &100u64);
+    assert_eq!(client.get_unique_funder_count(), 1);
+
+    // Second investor funds with commitment (reaches cap)
+    client.fund_with_commitment(&inv2, &10_000_000_000i128, &200u64);
+    assert_eq!(client.get_unique_funder_count(), 2);
+
+    // Third investor attempts to fund with commitment (exceeds cap)
+    let res = client.try_fund_with_commitment(&inv3, &10_000_000_000i128, &100u64);
+    assert!(res.is_err());
+    assert_eq!(client.get_unique_funder_count(), 2);
+}
+
