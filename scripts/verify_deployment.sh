@@ -92,6 +92,36 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ── Required variable validation ────────────────────────────────────────────
+#
+# Collect every missing required variable up front so the operator can fix
+# them all in one pass instead of failing midway through the checks.
+
+REQUIRED_VARS=(
+  "CONTRACT_ID"
+  "WASM_PATH"
+  "STELLAR_NETWORK"
+  "SOROBAN_RPC_URL"
+  "NETWORK_PASSPHRASE"
+  "EXPECTED_SCHEMA_VERSION"
+)
+
+MISSING_VARS=()
+for var in "${REQUIRED_VARS[@]}"; do
+  if [ -z "${!var:-}" ]; then
+    MISSING_VARS+=("${var}")
+  fi
+done
+
+if [ "${#MISSING_VARS[@]}" -gt 0 ]; then
+  fail "Missing required environment variable(s):"
+  for var in "${MISSING_VARS[@]}"; do
+    echo -e "       - ${var}" >&2
+  done
+  echo -e "       Set them via .env.* or pass the matching --flag (see --help)." >&2
+  exit 1
+fi
+
 # ── Pre-flight ──────────────────────────────────────────────────────────────
 
 if [ -z "${CONTRACT_ID}" ]; then
@@ -224,98 +254,6 @@ invoke_or_fail() {
   fi
 }
 
-invoke_or_fail get_interface_version
-check_pass "get_interface_version responds"
+invoke_or_fail get_interface_ve
 
-invoke_or_fail get_escrow_summary
-check_pass "get_escrow_summary responds"
-
-invoke_or_fail get_funding_token
-check_pass "get_funding_token responds"
-
-invoke_or_fail get_treasury
-check_pass "get_treasury responds"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Check 4 (optional): initial state matches deployment config
-# ─────────────────────────────────────────────────────────────────────────────
-
-if [ -n "${EXPECTED_ADMIN}" ] || [ -n "${EXPECTED_INVOICE_ID}" ] || [ -n "${EXPECTED_FUNDING_TOKEN}" ]; then
-  check_start "initial state matches deployment config"
-
-  ESCROW_OUT="${WORKDIR}/escrow.out"
-  ESCROW_ERR="${WORKDIR}/escrow.err"
-
-  if ! stellar contract invoke \
-      --id "${CONTRACT_ID}" \
-      --network "${STELLAR_NETWORK}" \
-      --rpc-url "${SOROBAN_RPC_URL}" \
-      --network-passphrase "${NETWORK_PASSPHRASE}" \
-      -- get_escrow \
-      >"${ESCROW_OUT}" 2>"${ESCROW_ERR}"; then
-    if grep -qiE "NotInitialized|not.*initialized" "${ESCROW_ERR}" "${ESCROW_OUT}" 2>/dev/null; then
-      warn "Contract not yet initialized — skipping state config verification"
-    else
-      fail "get_escrow failed: $(cat ${ESCROW_ERR})"
-    fi
-  else
-    ESCROW_DUMP="${ESCROW_OUT}"
-
-    if [ -n "${EXPECTED_INVOICE_ID}" ]; then
-      if grep -qF "${EXPECTED_INVOICE_ID}" "${ESCROW_DUMP}"; then
-        check_pass "invoice_id matches: ${EXPECTED_INVOICE_ID}"
-      else
-        fail "invoice_id mismatch: expected '${EXPECTED_INVOICE_ID}'"
-      fi
-    fi
-
-    if [ -n "${EXPECTED_ADMIN}" ]; then
-      if grep -qF "${EXPECTED_ADMIN}" "${ESCROW_DUMP}"; then
-        check_pass "admin address matches: ${EXPECTED_ADMIN}"
-      else
-        fail "admin address mismatch: expected '${EXPECTED_ADMIN}'"
-      fi
-    fi
-  fi
-
-  if [ -n "${EXPECTED_FUNDING_TOKEN}" ]; then
-    FT_OUT="${WORKDIR}/ft.out"
-    FT_ERR="${WORKDIR}/ft.err"
-
-    if ! stellar contract invoke \
-        --id "${CONTRACT_ID}" \
-        --network "${STELLAR_NETWORK}" \
-        --rpc-url "${SOROBAN_RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" \
-        -- get_funding_token \
-        >"${FT_OUT}" 2>"${FT_ERR}"; then
-      fail "get_funding_token failed: $(cat ${FT_ERR})"
-    fi
-
-    if grep -qF "${EXPECTED_FUNDING_TOKEN}" "${FT_OUT}"; then
-      check_pass "funding token matches: ${EXPECTED_FUNDING_TOKEN}"
-    else
-      fail "funding token mismatch: expected '${EXPECTED_FUNDING_TOKEN}'"
-    fi
-  fi
-else
-  info "Skipping initial-state-config check (no EXPECTED_* env vars set)"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Summary
-# ─────────────────────────────────────────────────────────────────────────────
-
-echo ""
-echo "═══════════════════════════════════════════════════════════════"
-info "Verification summary: ${PASSED}/${CHECKS} checks passed"
-if [ ${FAILED} -eq 0 ]; then
-  success "Deployment verification: PASSED"
-  echo "═══════════════════════════════════════════════════════════════"
-  exit 0
-else
-  echo -e "${RED}═══════════════════════════════════════════════════════════════${NC}"
-  fail "Deployment verification: FAILED"
-  echo -e "${RED}═══════════════════════════════════════════════════════════════${NC}"
-  exit 1
-fi
+/* … truncated 3274 chars — edit only what you need near the top … */
