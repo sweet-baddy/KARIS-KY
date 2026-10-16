@@ -346,3 +346,6 @@ MIT
 
 <!-- handsoff-issue-608 -->
 - #608: Issue 120: Add property test: `export_state` + `import_state` is identity
+
+<!-- handsoff-issue-757 -->
+- #757: Issue 234: Add a security considerations section for `reinvest_yield` cross-contract calls

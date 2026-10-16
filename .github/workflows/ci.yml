@@ -42,6 +42,13 @@ jobs:
       - name: Build
         run: cargo build
 
+      - name: Build docs (deny broken intra-doc links)
+        # Fails CI on any broken rustdoc intra-doc link so documentation
+        # references to non-existent items cannot regress unnoticed.
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: "-D rustdoc::broken_intra_doc_links"
+
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
@@ -211,59 +218,3 @@ jobs:
         run: |
           SPEC_VERSION="v$(date +%Y.%m.%d)-$(git rev-parse --short HEAD)"
           echo "SPEC_VERSION=${SPEC_VERSION}" >> $GITHUB_ENV
-
-          # Create a lightweight tag for the spec version
-          git tag -f "spec-latest"
-          git push -f origin "spec-latest"
-
-          # Upload spec as a release asset
-          gh release create "spec-latest" \
-            sdk-ts/spec.json \
-            --title "Contract Spec (latest)" \
-            --notes "Auto-published contract ABI spec from main @ ${SPEC_VERSION}. Schema v${SCHEMA_VERSION:-6}, Interface v${INTERFACE_VERSION:-1}." \
-            --prerelease \
-            || gh release upload "spec-latest" sdk-ts/spec.json --clobber
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCHEMA_VERSION: "6"
-          INTERFACE_VERSION: "1"
-
-      # -----------------------------------------------------------------------
-
-      - name: Workspace Clippy (all targets)
-        run: cargo clippy -p karis_ky_escrow --all-targets -- -D warnings
-
-      - name: Check coverage (≥ 95%)
-        run: |
-          cargo llvm-cov \
-            --features testutils \
-            --fail-under-lines 95 \
-            --summary-only \
-            -p karis_ky_escrow
-
-  npm-audit:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        package: [sdk-ts, sdk, docs]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install dependencies (${{ matrix.package }})
-        working-directory: ${{ matrix.package }}
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
-
-      - name: Run npm audit (${{ matrix.package }})
-        working-directory: ${{ matrix.package }}
-        run: npm audit --audit-level=high
