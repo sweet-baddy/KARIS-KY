@@ -32,6 +32,86 @@ Operations that are **not** gated (read-only or metadata-only):
 
 ---
 
+## Guardian two-step legal hold flow
+
+When an escrow is initialized with `init_with_guardian`, activating a hold is a
+two-step process: the current admin **proposes** and the configured guardian
+**confirms**. Neither party can activate a hold alone. The legacy one-step
+`set_legal_hold(true, ...)` and `set_legal_hold_multisig(..., true, ...)` paths
+reject guardian-configured escrows.
+
+### Sequence diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Admin as Current Admin
+    participant Escrow as Escrow Contract
+    participant Guardian as Configured Guardian
+
+    Admin->>Escrow: propose_legal_hold(reason)
+    Escrow->>Escrow: admin.require_auth()
+    Escrow->>Escrow: store proposal expiry = now + 3,600s
+    Escrow-->>Admin: LegalHoldProposed { expires_at }
+
+    Note over Escrow,Guardian: Proposal is valid for < 1 hour of ledger time
+
+    Guardian->>Escrow: confirm_legal_hold()
+    Escrow->>Escrow: guardian.require_auth()
+    alt now < proposal expiry
+        Escrow->>Escrow: store LegalHold = true
+        Escrow-->>Guardian: LegalHoldChanged { active: true }
+    else proposal expired
+        Escrow-->>Guardian: panic: LegalHoldProposalExpired (207)
+    end
+```
+
+### Worked example (CLI)
+
+```bash
+# 1. Admin proposes the hold (starts the one-hour window).
+stellar contract invoke \
+  --id $ESCROW_ID --source $ADMIN_KEY \
+  -- propose_legal_hold --reason "court order 2024-118"
+
+# 2. Guardian confirms before the proposal expires.
+stellar contract invoke \
+  --id $ESCROW_ID --source $GUARDIAN_KEY \
+  -- confirm_legal_hold
+
+# 3. Verify the hold is active.
+stellar contract invoke \
+  --id $ESCROW_ID --source $ANY_KEY \
+  -- get_legal_hold
+```
+
+### Proposal expiry
+
+A pending proposal is valid for **less than one hour** of ledger time
+(`now + 3,600` seconds at proposal time). Confirmation after that boundary is
+rejected with error **207** (`LegalHoldProposalExpired`). The admin may replace
+a pending proposal at any time by calling `propose_legal_hold` again, which
+resets the expiry window; an expired proposal cannot be confirmed and must be
+re-proposed.
+
+### Authority mismatch
+
+Each step enforces a distinct authorization:
+
+- `propose_legal_hold` requires the **current admin** signature. A guardian
+  calling it, or any other signer, fails with error **208**
+  (`LegalHoldProposalUnauthorized`).
+- `confirm_legal_hold` requires the **configured guardian** signature. The
+  admin (or any other signer) confirming fails with error **209**
+  (`LegalHoldConfirmUnauthorized`).
+- Confirming when no proposal is pending fails with error **210**
+  (`NoPendingLegalHoldProposal`).
+
+These errors are distinct from the legacy one-step path, which rejects
+guardian-configured escrows outright rather than accepting a proposal.
+
+---
+
 ## Enforcement model
 
 ```
@@ -167,63 +247,4 @@ This is why single-signer production admins are prohibited.
 `propose_admin` and `accept_admin` are not gated by the hold. This is
 intentional: if the current admin is compromised or unresponsive, governance
 must be able to rotate the admin key even while a hold is active. The handover
-still requires both the current admin and successor to authorize. After
-acceptance the new admin inherits the hold state and must explicitly call
-`clear_legal_hold` to unfreeze.
-
----
-
-## Assumptions and out-of-scope items
-
-| Item | Status |
-|---|---|
-| Timelock on hold duration | Out of scope — enforce off-chain |
-| Multi-party approval to set hold | Out of scope — use a governed `admin` |
-| Two-step approval to clear hold | Out of scope — clearance remains admin-only |
-| Automatic hold expiry | Out of scope |
-| Hold on non-risk-bearing reads | Out of scope — reads are always safe |
-| Fee-on-transfer or rebasing tokens | Out of scope — unsupported by design |
-| Sybil resistance for investor cap | Out of scope — limits chain accounts only |
-
----
-
-## Test coverage
-
-The matrix in `escrow/src/tests/legal_hold.rs` covers:
-
-1. Each gated function panics with the exact message when hold is `true`.
-2. Each gated function succeeds normally when hold is `false` (or cleared).
-3. `set_legal_hold` requires admin auth; non-admin call panics.
-4. `clear_legal_hold` requires admin auth; non-admin call panics.
-5. Hold defaults to `false` after `init`.
-6. Hold persists across status transitions (no bypass via state change).
-7. Hold can be toggled and re-blocks operations after re-set.
-8. Hold persists after two-step admin handover; new admin must explicitly clear it.
-9. `request_clear_legal_hold` requires admin auth and the configured delay is enforced before the hold can be cleared.
-10. Edge cases: hold check fires before amount / status / auth validation.
-10. Non-gated ops (`update_maturity`, `propose_admin`, `accept_admin`, getters) are not blocked.
-11. Claim idempotency survives a hold toggle.
-12. Single hold toggle blocks all gated entrypoints in separate escrows.
-13. Legacy initialization retains one-step activation; guardian initialization requires proposal and confirmation.
-14. Guardian confirmation rejects expired proposals and immediate-activation bypasses.
-
-## Deployment compatibility
-
-`InvoiceEscrow` now stores an optional guardian, changing its XDR layout and
-advancing the schema to version 8. Existing instances cannot be upgraded in
-place with the current migration implementation; deploy a new instance to use
-guardian protection. Existing `init` callers remain compatible and configure
-no guardian. Use `init_with_guardian` to bind the guardian at initialization.
-
----
-
-## Interaction with dispute pause
-
-Legal hold and dispute pause are two independent risk-control overlays that can
-be active simultaneously on the same escrow. Both block overlapping
-risk-bearing operations.
-
-See [`docs/OPERATOR_RUNBOOK.md`](OPERATOR_RUNBOOK.md) **§8. Interaction
-Matrix: Legal Hold vs. Dispute Pause** for the full operation matrix,
-precedence rules, and examples of managing both controls during operational or
-compliance events.
+still requires both the current admin and successor to authorize the change.
