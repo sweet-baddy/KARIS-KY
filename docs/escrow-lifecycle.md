@@ -135,6 +135,91 @@ Once one path is taken, the other is unreachable:
 
 ---
 
+## Partial settlement (`partial_settle` / `settle(Some(amount))`)
+
+Full settlement pays investors the entire outstanding principal plus yield in one shot.
+**Partial settlement** lets the SME release a portion of the outstanding principal now and
+settle the remainder later, without leaving the `funded` state. This is useful when the SME
+receives cash in tranches (e.g. a customer pays an invoice in installments) and wants to
+pass each tranche through to investors as it arrives.
+
+### How it works
+
+- `partial_settle(amount)` (equivalently `settle(Some(amount))`) requires `status == 1` (funded),
+  SME auth, and no active legal hold — the same gates as full `settle()`.
+- `amount` must be `> 0` and `<= outstanding principal`. Settling the full outstanding principal
+  via `partial_settle` is equivalent to a full `settle()` and transitions `status 1 → 2`.
+- Each partial settlement **distributes `amount` of principal pro-rata** across investors based on
+  their contribution share, and records the cumulative amount distributed so far.
+- The escrow **stays in `funded`** after a partial settlement; investors can claim their share
+  immediately via `claim_investor_payout()`.
+- A later `settle()` (or `partial_settle` of the remaining balance) finalizes the escrow.
+
+### Investor-facing effect
+
+Investors are paid **incrementally, as each tranche is settled**, rather than waiting for a single
+final settlement. Each investor's claimable amount after a partial settlement is:
+
+```
+claimable_i = amount * (contribution_i / total_principal) - already_claimed_i
+```
+
+Because distribution is pro-rata, every investor receives the same fraction of their contribution
+at each step. Investors who have not yet claimed simply accumulate a larger claimable balance.
+
+### Worked numeric example
+
+Assume an escrow with `funding_target = 100_000` and three investors:
+
+| Investor | Contribution | Share |
+|----------|--------------|-------|
+| Alice | 50_000 | 50% |
+| Bob | 30_000 | 30% |
+| Carol | 20_000 | 20% |
+| **Total** | **100_000** | **100%** |
+
+**Step 1 — SME calls `partial_settle(40_000)`.**
+
+40% of principal is distributed pro-rata:
+
+| Investor | Distributed this step | Cumulative distributed |
+|----------|-----------------------|------------------------|
+| Alice | 40_000 × 50% = 20_000 | 20_000 |
+| Bob | 40_000 × 30% = 12_000 | 12_000 |
+| Carol | 40_000 × 20% = 8_000 | 8_000 |
+| **Total** | **40_000** | **40_000** |
+
+Status remains `1` (funded). `get_distributed_principal()` now returns `40_000`.
+
+**Step 2 — SME calls `partial_settle(60_000)` to settle the remainder.**
+
+| Investor | Distributed this step | Cumulative distributed |
+|----------|-----------------------|------------------------|
+| Alice | 60_000 × 50% = 30_000 | 50_000 |
+| Bob | 60_000 × 30% = 18_000 | 30_000 |
+| Carol | 60_000 × 20% = 12_000 | 20_000 |
+| **Total** | **60_000** | **100_000** |
+
+Because the full outstanding principal has now been distributed, the escrow transitions
+`status 1 → 2` (settled). `get_distributed_principal()` returns `100_000`.
+
+### `get_distributed_principal`
+
+`get_distributed_principal()` returns the **cumulative principal that has been distributed to
+investors so far** across all settlements (partial and final). It is the running total of every
+`partial_settle`/`settle` amount applied to principal.
+
+- Before any settlement: `0`.
+- After a partial settlement of `amount`: increases by `amount`.
+- After full settlement: equals the total funded principal.
+
+It lets SMEs and investors verify how much principal has been released without reconstructing
+the history of settlement calls, and it is the value used to compute the remaining outstanding
+principal (`total_principal - get_distributed_principal()`) that a subsequent `partial_settle`
+may distribute.
+
+---
+
 ## Investor refund path (status 4 — cancelled)
 
 When an escrow is cancelled before reaching its funding target, investors may recover
@@ -211,114 +296,6 @@ When `maturity > 0`:
 
 ---
 
-## Maturity extension guard (`update_maturity`)
+## Maturity extension guard (`update_ma
 
-An admin can no longer extend maturity in a single transaction. Extending maturity
-delays investor repayment, so it is treated as a sensitive admin action and must
-pass through a propose/confirm flow with a timelock or guardian confirmation.
-
-### Shortening remains immediate
-
-- If the new maturity is **earlier** than the current maturity (shortening), or the
-  escrow is not yet funded, `update_maturity()` applies the change immediately.
-- Shortening is never delayed and never requires a guardian.
-
-### Extensions require delay or guardian
-
-- If the new maturity is **later** than the current maturity (an extension), the
-  admin must first call `propose_maturity_extension(new_maturity)`.
-- The proposal records the proposed maturity and the earliest execution timestamp
-  (`proposed_at + MATURITY_EXTENSION_DELAY`).
-- `confirm_maturity_extension()` applies the extension once either:
-  - the timelock has elapsed (`env.ledger().timestamp() >= earliest_execution`), or
-  - the configured guardian has confirmed the proposal.
-- Calling `confirm_maturity_extension()` before the delay elapses and without
-  guardian confirmation panics.
-- A new proposal overwrites any pending proposal and restarts the delay.
-
-### States permitting each operation
-
-| Operation | Permitted states | Notes |
-|-----------|------------------|-------|
-| `update_maturity()` (shorten) | `0` (open), `1` (funded) | Immediate; blocked in terminal states |
-| `update_maturity()` (extend) | `0` (open), `1` (funded) | Records a pending proposal only |
-| `propose_maturity_extension()` | `0` (open), `1` (funded) | Admin auth; blocked in terminal states |
-| `confirm_maturity_extension()` | `0` (open), `1` (funded) | Requires elapsed delay or guardian confirmation |
-
-Extensions are forbidden in terminal states (`2`, `3`, `4`, `5`); the status never
-regresses and maturity is irrelevant once the escrow is settled, withdrawn,
-cancelled, or archived.
-
-### Events emitted
-
-| Event | When |
-|-------|------|
-| `MaturityExtensionProposed` | `propose_maturity_extension()` succeeds |
-| `MaturityExtensionConfirmed` | `confirm_maturity_extension()` succeeds |
-| `MaturityUpdated` | `update_maturity()` applies an immediate (shortening) change |
-
----
-
-## Two-step upgrade flow
-
-`upgrade(new_wasm_hash)` no longer takes effect immediately. A compromised admin key
-can no longer swap the contract code in a single transaction; the code swap must be
-proposed and then executed after a minimum delay.
-
-### Flow
-
-1. Admin calls `propose_upgrade(new_wasm_hash)`.
-   - Records the proposed wasm hash and the earliest execution timestamp
-     (`proposed_at + UPGRADE_DELAY`).
-   - Emits `UpgradeProposed`.
-2. After the delay elapses, admin calls `execute_upgrade()`.
-   - Applies the pending wasm hash via `env.deployer().update_current_contract_wasm()`.
-   - Emits `UpgradeExecuted`.
-   - Clears the pending proposal.
-3. Calling `execute_upgrade()` before the delay elapses, or with no pending proposal,
-   panics.
-
-### States permitting each operation
-
-| Operation | Permitted states | Notes |
-|-----------|------------------|-------|
-| `propose_upgrade()` | Any | Admin auth; records a pending proposal |
-| `execute_upgrade()` | Any | Admin auth; requires elapsed delay and a pending proposal |
-
-The legacy `upgrade(new_wasm_hash)` entry point is gated behind the new flow: it is
-retained for interface compatibility but must not bypass the propose/execute delay.
-
-### Events emitted
-
-| Event | When |
-|-------|------|
-| `UpgradeProposed` | `propose_upgrade()` succeeds |
-| `UpgradeExecuted` | `execute_upgrade()` succeeds |
-
----
-
-## Terminal states and dust sweep
-
-`sweep_terminal_dust()` is permitted in all three terminal states:
-
-| Status | Terminal | Dust sweep allowed |
-|--------|----------|--------------------|
-| `2` (settled) | Yes | Yes |
-| `3` (withdrawn) | Yes | Yes |
-| `4` (cancelled) | Yes | Yes |
-| `5` (archived) | Yes | Yes |
-
-This allows the treasury to recover any rounding residue left after all investors
-have been refunded or the escrow has been archived.
-
----
-
-## Security notes
-
-- **Out of scope:** Non-standard token economics (rebasing, fee-on-transfer).
-  See `escrow/src/external_calls.rs` and `docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`.
-- **funded_amount** is a non-decreasing i128. Overflow is checked via `checked_add`.
-- **Snapshot immutability:** `FundingCloseSnapshot` is written once at the
-  `0 → 1` transition and must remain readable after `settle()` or `withdraw()`.
-- **Refund double-spend prevention:** `InvestorContribution` is zeroed before the
-  token transfer; a second `refund()` call finds contribution `0` and panics.
+/* … truncated 4646 chars — edit only what you need near the top … */
