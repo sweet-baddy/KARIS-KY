@@ -661,6 +661,8 @@ pub enum EscrowError {
     ReinvestYieldInsufficient = 184,
     /// [`LiquifactEscrow::withdraw`] called by a caller that is not the registered SME address.
     UnauthorizedWithdrawer = 185,
+    /// Source and target escrows must use the same funding token for yield reinvestment.
+    ReinvestFundingTokenMismatch = 186,
     /// A guardian-configured escrow requires admin proposal and guardian confirmation to activate a hold.
     LegalHoldRequiresGuardianConfirmation = 207,
     /// No legal-hold proposal is pending for guardian confirmation.
@@ -5207,7 +5209,7 @@ impl LiquifactEscrow {
     /// allowlist rejection, cap violations, and checked-arithmetic overflow.
     pub fn fund(env: Env, investor: Address, amount: i128) -> InvoiceEscrow {
         let mut escrow = Self::get_escrow(env.clone());
-        Self::fund_impl(&env, &mut escrow, investor, amount, true, 0);
+        Self::fund_impl(&env, &mut escrow, investor, amount, true, 0, false);
         env.storage().instance().set(&DataKey::Escrow, &escrow);
         escrow
     }
@@ -5226,7 +5228,15 @@ impl LiquifactEscrow {
         committed_lock_secs: u64,
     ) -> InvoiceEscrow {
         let mut escrow = Self::get_escrow(env.clone());
-        Self::fund_impl(&env, &mut escrow, investor, amount, false, committed_lock_secs);
+        Self::fund_impl(
+            &env,
+            &mut escrow,
+            investor,
+            amount,
+            false,
+            committed_lock_secs,
+            false,
+        );
         env.storage().instance().set(&DataKey::Escrow, &escrow);
         escrow
     }
@@ -5262,10 +5272,15 @@ impl LiquifactEscrow {
         // Load the escrow once before the loop; apply all entries in memory and
         // persist exactly once after the loop to avoid per-entry read/write pairs.
         let mut escrow = Self::get_escrow(env.clone());
+        ensure(
+            &env,
+            escrow.status == 0,
+            EscrowError::EscrowNotOpenForFunding,
+        );
 
         for i in 0..n {
             let (investor, amount) = entries.get(i).unwrap();
-            Self::fund_impl(&env, &mut escrow, investor, amount, true, 0);
+            Self::fund_impl(&env, &mut escrow, investor, amount, true, 0, true);
         }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
@@ -5318,6 +5333,11 @@ impl LiquifactEscrow {
         // Load the escrow once before the loop; apply all entries in memory and
         // persist exactly once after the loop to avoid per-entry read/write pairs.
         let mut escrow = Self::get_escrow(env.clone());
+        ensure(
+            &env,
+            escrow.status == 0,
+            EscrowError::EscrowNotOpenForFunding,
+        );
 
         // Track how much principal this batch call contributes in total.
         let funded_before: i128 = escrow.funded_amount;
@@ -5326,7 +5346,7 @@ impl LiquifactEscrow {
             let (investor, amount) = contributions.get(i).unwrap();
             // fund_impl handles per-investor require_auth(), all validation,
             // per-investor persistent writes, per-entry events, and status transitions.
-            Self::fund_impl(&env, &mut escrow, investor, amount, true, 0);
+            Self::fund_impl(&env, &mut escrow, investor, amount, true, 0, true);
         }
 
         // Persist the escrow exactly once after the loop.
@@ -5394,6 +5414,7 @@ impl LiquifactEscrow {
         amount: i128,
         simple_fund: bool,
         committed_lock_secs: u64,
+        batch_funding: bool,
     ) {
         investor.require_auth();
 
@@ -5434,7 +5455,7 @@ impl LiquifactEscrow {
         );
         ensure(
             env,
-            escrow.status == 0,
+            escrow.status == 0 || (batch_funding && escrow.status == 1),
             EscrowError::EscrowNotOpenForFunding,
         );
 
@@ -5601,15 +5622,19 @@ impl LiquifactEscrow {
             }
         }
 
+        ensure!(amount <= escrow.funding_target, EscrowError::FundingTargetExceeded);
+
         let new_funded = escrow
             .funded_amount
             .checked_add(amount)
             .unwrap_or_else(|| fail(env, EscrowError::FundedAmountOverflow));
 
-        ensure!(
-            new_funded <= escrow.funding_target,
-            EscrowError::FundingTargetExceeded
-        );
+        if !batch_funding {
+            ensure!(
+                new_funded <= escrow.funding_target,
+                EscrowError::FundingTargetExceeded
+            );
+        }
 
         escrow.funded_amount = new_funded;
 
@@ -7033,6 +7058,7 @@ impl LiquifactEscrow {
     /// - [`EscrowError::ReinvestSourceEscrowNotSettled`] if the source escrow is not settled.
     /// - [`EscrowError::ReinvestTargetEscrowNotFunding`] if the target is not in funding state.
     /// - [`EscrowError::ReinvestYieldInsufficient`] if `amount` exceeds the investor's accrued yield.
+    /// - [`EscrowError::ReinvestFundingTokenMismatch`] if the two escrows use different tokens.
     pub fn reinvest_yield(env: Env, investor: Address, target_escrow: Address, amount: i128) {
         investor.require_auth();
         ensure(&env, amount > 0, EscrowError::ReinvestAmountNotPositive);
@@ -7064,6 +7090,31 @@ impl LiquifactEscrow {
             &env,
             accrued_yield >= amount,
             EscrowError::ReinvestYieldInsufficient,
+        );
+
+        let source_token = Self::funding_token_or_fail(&env);
+        let target_token: Address = env.invoke_contract(
+            &target_escrow,
+            &Symbol::new(&env, "get_funding_token"),
+            soroban_sdk::vec![&env],
+        );
+        ensure(
+            &env,
+            source_token == target_token,
+            EscrowError::ReinvestFundingTokenMismatch,
+        );
+
+        let target_total = target
+            .funded_amount
+            .checked_add(amount)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
+        let source_id = env.current_contract_address();
+        external_calls::transfer_funding_token_with_balance_checks(
+            &env,
+            &source_token,
+            &source_id,
+            &target_escrow,
+            amount,
         );
 
         let current_reinvested: i128 = env
@@ -7107,11 +7158,6 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .set(&DataKey::ReinvestmentAuditLog, &audit_log);
-
-        let target_total = target
-            .funded_amount
-            .checked_add(amount)
-            .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
 
         env.invoke_contract::<InvoiceEscrow>(
             &target_escrow,

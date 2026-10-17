@@ -190,7 +190,6 @@ fn test_repeated_funding_accumulates_contribution() {
 }
 
 #[test]
-#[should_panic]
 fn test_reinvest_yield_rejects_target_not_in_funding_state() {
     let env = Env::default();
     env.mock_all_auths();
@@ -198,8 +197,8 @@ fn test_reinvest_yield_rejects_target_not_in_funding_state() {
     let investor = Address::generate(&env);
     default_init(&source_client, &env, &admin, &sme);
 
-    let target = Address::generate(&env);
     let target_client = deploy(&env);
+    let target = target_client.address.clone();
     let target_admin = Address::generate(&env);
     let target_sme = Address::generate(&env);
     target_client.init(
@@ -221,13 +220,14 @@ fn test_reinvest_yield_rejects_target_not_in_funding_state() {
         &None,
         &None,
     );
+    let target_investor = Address::generate(&env);
+    target_client.fund(&target_investor, &TARGET);
+    target_client.settle();
     source_client.fund(&investor, &TARGET);
     source_client.settle();
 
-    let settled = source_client.get_escrow();
-    assert_eq!(settled.status, 2u32);
-
-    source_client.reinvest_yield(&investor, &target, &1_000i128);
+    let result = source_client.try_reinvest_yield(&investor, &target, &1_000i128);
+    assert_contract_error(result, EscrowError::ReinvestTargetEscrowNotFunding);
 }
 
 #[test]
@@ -3429,6 +3429,8 @@ fn test_fund_batch_mid_batch_funded_transition() {
     let inv1 = Address::generate(&env);
     let inv2 = Address::generate(&env);
     let inv3 = Address::generate(&env);
+    let inv4 = Address::generate(&env);
+    let inv5 = Address::generate(&env);
 
     let mut entries = SorobanVec::new(&env);
     // inv1 brings total to 40k (still open)
@@ -3437,22 +3439,32 @@ fn test_fund_batch_mid_batch_funded_transition() {
     entries.push_back((inv2.clone(), 55_000i128));
     // inv3 brings total to 105k (crosses funded threshold)
     entries.push_back((inv3.clone(), 10_000i128));
+    // Entries after the funded transition are still processed.
+    entries.push_back((inv4.clone(), 4_000i128));
+    entries.push_back((inv5.clone(), 6_000i128));
 
-    let result = client.fund_batch(&entries);
+    assert!(client.get_funding_close_snapshot().is_none());
+    let result = client.batch_fund(&entries);
 
     // Verify transition occurred
     assert_eq!(result.status, 1, "status should be funded (1) after batch");
-    assert_eq!(result.funded_amount, 105_000i128);
+    assert_eq!(result.funded_amount, 115_000i128);
 
     // Verify all entries were processed
     assert_eq!(client.get_contribution(&inv1), 40_000i128);
     assert_eq!(client.get_contribution(&inv2), 55_000i128);
     assert_eq!(client.get_contribution(&inv3), 10_000i128);
+    assert_eq!(client.get_contribution(&inv4), 4_000i128);
+    assert_eq!(client.get_contribution(&inv5), 6_000i128);
 
-    // Verify snapshot was captured
+    // Snapshot is captured at entry 3 and is not replaced by later batch entries.
     let snap = client.get_funding_close_snapshot();
     assert!(snap.is_some());
-    assert_eq!(snap.unwrap().total_principal, 105_000i128);
+    let snap = snap.unwrap();
+    assert_eq!(snap.total_principal, 105_000i128);
+    assert_eq!(snap.funding_target, target);
+    assert_eq!(snap.closed_at_ledger_timestamp, env.ledger().timestamp());
+    assert_eq!(snap.closed_at_ledger_sequence, env.ledger().sequence());
 }
 
 #[test]

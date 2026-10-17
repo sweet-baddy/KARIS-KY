@@ -1896,7 +1896,10 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
     // Mint funded_amount into the escrow contract so withdraw() can transfer it.
     token.stellar.mint(&escrow_id, &TARGET);
     client.rotate_beneficiary(&new_sme);
-    client.withdraw();
+    let old_sme_result = client.try_withdraw(&sme);
+    assert_contract_error(old_sme_result, EscrowError::UnauthorizedWithdrawer);
+    client.withdraw(&new_sme);
+    assert_eq!(token.stellar.balance(&sme), 0);
     assert_eq!(token.stellar.balance(&new_sme), TARGET);
 }
 
