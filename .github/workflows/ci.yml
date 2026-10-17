@@ -20,6 +20,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  backend-python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backup test dependencies
+        run: python -m pip install pytest "stellar-sdk>=11.0.0"
+
+      - name: Test escrow backup tooling
+        run: python -m pytest backend/tests
+
   fmt-build-test:
     runs-on: ubuntu-latest
     steps:

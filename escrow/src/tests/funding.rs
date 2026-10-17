@@ -1,4 +1,5 @@
 use super::*;
+use crate::BatchFundCompleted;
 use soroban_sdk::{Error, InvokeError};
 use std::fmt::Debug;
 
@@ -3579,6 +3580,166 @@ fn test_fund_batch_max_batch_size() {
 
     // Verify all entries were processed
     assert_eq!(result.funded_amount, (MAX_FUND_BATCH as i128) * 1_000i128);
+}
+
+#[test]
+fn test_batch_fund_max_batch_size_within_instruction_budget() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let mut entries = SorobanVec::new(&env);
+    for _ in 0..MAX_FUND_BATCH {
+        entries.push_back((Address::generate(&env), 1_000i128));
+    }
+
+    env.cost_estimate().budget().reset_unlimited();
+    let budget = env.cost_estimate().budget();
+    let result = client.batch_fund(&entries);
+
+    assert_eq!(result.funded_amount, MAX_FUND_BATCH as i128 * 1_000);
+    assert!(
+        budget.cpu_instruction_cost() <= SOROBAN_TX_MAX_INSTRUCTIONS,
+        "batch_fund with {MAX_FUND_BATCH} entries exceeds the CPU instruction budget: {} > {}",
+        budget.cpu_instruction_cost(),
+        SOROBAN_TX_MAX_INSTRUCTIONS
+    );
+}
+
+#[test]
+fn test_batch_fund_rejects_51_entries() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let mut entries = SorobanVec::new(&env);
+    for _ in 0..=MAX_FUND_BATCH {
+        entries.push_back((Address::generate(&env), 1_000i128));
+    }
+
+    assert_contract_error(
+        client.try_batch_fund(&entries),
+        EscrowError::FundingBatchTooLarge,
+    );
+}
+
+#[test]
+fn test_batch_fund_is_atomic_when_last_entry_is_not_allowlisted() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let allowed_one = Address::generate(&env);
+    let allowed_two = Address::generate(&env);
+    let not_allowlisted = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&allowed_one, &true);
+    client.set_investor_allowlisted(&allowed_two, &true);
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((allowed_one.clone(), 1_000i128));
+    entries.push_back((allowed_two.clone(), 2_000i128));
+    entries.push_back((not_allowlisted.clone(), 3_000i128));
+
+    assert_contract_error(
+        client.try_batch_fund(&entries),
+        EscrowError::InvestorNotAllowlisted,
+    );
+
+    assert_eq!(client.get_escrow().funded_amount, 0);
+    assert_eq!(client.get_contribution(&allowed_one), 0);
+    assert_eq!(client.get_contribution(&allowed_two), 0);
+    assert_eq!(client.get_contribution(&not_allowlisted), 0);
+    assert_eq!(client.get_unique_funder_count(), 0);
+}
+
+#[test]
+fn test_batch_fund_summary_event_payload_for_distinct_and_repeated_investors() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id_distinct, client_distinct) = deploy_with_id(&env);
+    let (contract_id_repeated, client_repeated) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    for client in [&client_distinct, &client_repeated] {
+        client.init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "BATCH_EVENT"),
+            &sme,
+            &100_000i128,
+            &800i64,
+            &0u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+        );
+    }
+
+    let distinct_one = Address::generate(&env);
+    let distinct_two = Address::generate(&env);
+    let mut distinct_entries = SorobanVec::new(&env);
+    distinct_entries.push_back((distinct_one, 1_000i128));
+    distinct_entries.push_back((distinct_two, 2_000i128));
+    let distinct_result = client_distinct.batch_fund(&distinct_entries);
+    let distinct_summary = BatchFundCompleted {
+        name: symbol_short!("btch_fnd"),
+        invoice_id: distinct_result.invoice_id,
+        total_funded_amount: 3_000,
+        investor_count: 2,
+        escrow_funded_amount: 3_000,
+        status: 0,
+    }
+    .to_xdr(&env, &contract_id_distinct);
+
+    let repeated = Address::generate(&env);
+    let other = Address::generate(&env);
+    let mut repeated_entries = SorobanVec::new(&env);
+    repeated_entries.push_back((repeated.clone(), 1_000i128));
+    repeated_entries.push_back((other, 2_000i128));
+    repeated_entries.push_back((repeated, 3_000i128));
+    let repeated_result = client_repeated.batch_fund(&repeated_entries);
+    let repeated_summary = BatchFundCompleted {
+        name: symbol_short!("btch_fnd"),
+        invoice_id: repeated_result.invoice_id,
+        total_funded_amount: 6_000,
+        investor_count: 3,
+        escrow_funded_amount: 6_000,
+        status: 0,
+    }
+    .to_xdr(&env, &contract_id_repeated);
+
+    let events = env.events().all();
+    assert_eq!(
+        events
+            .events()
+            .iter()
+            .filter(|event| **event == distinct_summary)
+            .count(),
+        1,
+        "distinct-investor batch must emit exactly one summary with the expected payload"
+    );
+    assert_eq!(
+        events
+            .events()
+            .iter()
+            .filter(|event| **event == repeated_summary)
+            .count(),
+        1,
+        "repeated-investor batch must emit exactly one summary with the expected payload"
+    );
+    assert_eq!(client_repeated.get_unique_funder_count(), 2);
 }
 
 #[test]
