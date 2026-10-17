@@ -114,6 +114,24 @@ cargo +nightly fuzz run escrow_yield_calculations -- -max_total_time=30
 
 ---
 
+### 4. **escrow_attestations**
+
+Exercises arbitrary append, revoke, and filtered/paginated query sequences.
+
+**Invariants:**
+- Append-log length never exceeds `MAX_ATTESTATION_APPEND_ENTRIES` (32)
+- Invalid or repeated revocations fail without panicking the harness
+- Queries do not panic and returned pages/counts remain within capacity
+
+**Quick run:**
+```bash
+./run_fuzz.sh escrow_attestations 60 4
+```
+
+**Expected result:** ✅ Arbitrary operation sequences preserve the bounded log
+
+---
+
 ## Corpus Files
 
 The fuzzer builds a corpus of interesting inputs in `fuzz/corpus/`:

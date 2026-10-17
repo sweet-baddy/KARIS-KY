@@ -1,34 +1,46 @@
 # Escrow Legal Hold — Security Reference
 
 `DataKey::LegalHold` is a boolean compliance gate stored in contract instance
-storage. When `true` it blocks every risk-bearing state transition. This
-document describes the gated operations, the enforcement model, governance
-expectations, and explicit out-of-scope items.
+storage. When `true` it blocks every state-mutating entrypoint except the
+explicit recovery and maintenance whitelist below. This document describes the
+enforcement model, governance expectations, and explicit out-of-scope items.
 
 ---
 
 ## Gated operations
 
-| Function | Panic message when hold is active |
+Risk-bearing operations retain their specific errors:
+
+| Function | Error when hold is active |
 |---|---|
-| `fund` | `Legal hold blocks new funding while active` |
-| `fund_with_commitment` | `Legal hold blocks new funding while active` |
-| `settle` | `Legal hold blocks settlement finalization` |
-| `withdraw` | `Legal hold blocks SME withdrawal` |
-| `claim_investor_payout` | `Legal hold blocks investor claims` |
-| `sweep_terminal_dust` | `Legal hold blocks treasury dust sweep` |
+| `fund`, `fund_with_commitment`, batch funding | `LegalHoldBlocksFunding` |
+| `settle`, `partial_settle` | `LegalHoldBlocksSettlement` or `LegalHoldBlocksMutation` |
+| `withdraw` | `LegalHoldBlocksWithdrawal` |
+| investor payout claims | `LegalHoldBlocksInvestorClaims` |
+| `cancel_funding` | `LegalHoldBlocksCancelFunding` |
+| `sweep_terminal_dust` | `LegalHoldBlocksTreasuryDustSweep` |
+| Other state-mutating entrypoints | `LegalHoldBlocksMutation` (217) |
 
-All six checks call the private `legal_hold_active(&env)` helper, which reads
-`DataKey::LegalHold` from instance storage and defaults to `false` when the key
-is absent. The check is the **first** assertion in each function body, so no
-partial state mutation can occur before the gate fires.
+Shared admin/SME authorization loaders enforce the generic error, and direct
+investor or cross-contract mutation paths check the hold explicitly. Checks
+precede storage writes and external transfers. The flag defaults to `false`
+when its storage key is absent.
 
-Operations that are **not** gated (read-only or metadata-only):
+## Explicit whitelist
 
-- `get_*` accessors
-- `record_sme_collateral_commitment` (metadata record, no token movement)
-- `bind_primary_attestation_hash` / `append_attestation_digest`
-- `update_maturity`, `update_funding_target`, `propose_admin`, `accept_admin`, `migrate`
+Only these entrypoints remain callable while a hold is active:
+
+- `set_legal_hold`, `clear_legal_hold`, `request_clear_legal_hold`,
+  `propose_legal_hold`, and `confirm_legal_hold` to manage the hold.
+- `propose_admin`, `accept_admin`, and the deprecated `transfer_admin` shim
+  to recover admin authority.
+- `bump_ttl`, which only extends storage lifetime and cannot change escrow
+  balances, status, or configuration.
+- Initialization, which is only available before an escrow and hold exist.
+
+All read-only entrypoints remain available. Attestation updates, collateral
+metadata, investor delegation, refunds, notifications, and configuration changes
+are mutations and are blocked like other non-whitelisted operations.
 
 ---
 
@@ -191,8 +203,8 @@ acceptance the new admin inherits the hold state and must explicitly call
 
 The matrix in `escrow/src/tests/legal_hold.rs` covers:
 
-1. Each gated function panics with the exact message when hold is `true`.
-2. Each gated function succeeds normally when hold is `false` (or cleared).
+1. Risk-bearing paths return their specific legal-hold errors; other mutations return `LegalHoldBlocksMutation`.
+2. A table-driven proptest exercises randomized sequences of non-whitelisted mutation entrypoints under hold.
 3. `set_legal_hold` requires admin auth; non-admin call panics.
 4. `clear_legal_hold` requires admin auth; non-admin call panics.
 5. Hold defaults to `false` after `init`.
@@ -201,11 +213,11 @@ The matrix in `escrow/src/tests/legal_hold.rs` covers:
 8. Hold persists after two-step admin handover; new admin must explicitly clear it.
 9. `request_clear_legal_hold` requires admin auth and the configured delay is enforced before the hold can be cleared.
 10. Edge cases: hold check fires before amount / status / auth validation.
-10. Non-gated ops (`update_maturity`, `propose_admin`, `accept_admin`, getters) are not blocked.
-11. Claim idempotency survives a hold toggle.
-12. Single hold toggle blocks all gated entrypoints in separate escrows.
-13. Legacy initialization retains one-step activation; guardian initialization requires proposal and confirmation.
-14. Guardian confirmation rejects expired proposals and immediate-activation bypasses.
+11. Explicit recovery and maintenance exceptions work under hold; ordinary configuration and attestation changes do not.
+12. Claim idempotency survives a hold toggle.
+13. Single hold toggle blocks gated operations in separate escrows.
+14. Legacy initialization retains one-step activation; guardian initialization requires proposal and confirmation.
+15. Guardian confirmation rejects expired proposals and immediate-activation bypasses.
 
 ## Deployment compatibility
 

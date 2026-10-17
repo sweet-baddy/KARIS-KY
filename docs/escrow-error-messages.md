@@ -145,6 +145,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 211 | `LegalHoldGuardianNotConfigured` | `propose_legal_hold` | escrow has no guardian | Use legacy `set_legal_hold(true)` or initialize with guardian | typed |
 | 212 | `LegalHoldAlreadyActive` | `propose_legal_hold` | hold is already active | Clear the current hold before proposing another | typed |
 | 213 | `LegalHoldGuardianSameAsAdmin` | `init_with_guardian` | guardian address equals admin address | Configure an independent guardian address | typed |
+| 217 | `LegalHoldBlocksMutation` | Non-whitelisted state-mutating entrypoints | legal hold active | Clear the hold or use an explicit recovery/maintenance entrypoint | typed |
 | 160 | `LegalHoldBlocksBeneficiaryRotation` | `rotate_beneficiary` | legal hold active | Clear hold before rotation | typed |
 | 161 | `RotationNotOpen` | `rotate_beneficiary` | status not `0` (open) or `1` (funded) | Rotation only before settlement | typed |
 | 162 | `NewSmeSameAsCurrent` | `rotate_beneficiary` | `new_sme == current sme_address` | Pass a different beneficiary | typed |

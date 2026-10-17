@@ -217,8 +217,9 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::ConcentrationLimitExceeded, 166),
         (EscrowError::ConcentrationInvalidRange, 167),
         (EscrowError::LegalHoldReasonTooLong, 168),
+        (EscrowError::LegalHoldBlocksMutation, 217),
     ];
-    assert_eq!(TABLE.len(), 88);
+    assert_eq!(TABLE.len(), 89);
     for (variant, code) in TABLE {
         assert_eq!(*variant as u32, *code, "discriminant drift for code {code}");
     }

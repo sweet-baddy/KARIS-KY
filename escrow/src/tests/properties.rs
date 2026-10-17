@@ -1559,3 +1559,131 @@ fn fuzz_payout_conservation_multi_investor() {
         );
     }
 }
+
+proptest! {
+    #[test]
+    fn prop_dispute_pause_blocks_four_operations_until_expiry(
+        duration in 1u64..=crate::MAX_DISPUTE_PAUSE_DURATION_SECS,
+        before_offset in any::<u64>(),
+        after_offset in 0u64..=crate::MAX_DISPUTE_PAUSE_DURATION_SECS,
+    ) {
+        let before_expiry = before_offset % duration;
+
+        for operation in 0..4 {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, admin, sme) = setup(&env);
+            let investor = Address::generate(&env);
+            let token = install_stellar_asset_token(&env);
+            let treasury = Address::generate(&env);
+
+            client.init(
+                &admin,
+                &String::from_str(&env, "PROP_PAUSE"),
+                &sme,
+                &TARGET,
+                &800i64,
+                &0u64,
+                &token.id,
+                &None,
+                &treasury,
+                &None,
+                &None,
+                &None,
+                &None,
+                &None,
+                &None,
+                &None,
+                &None,
+            );
+
+            if operation != 0 {
+                client.fund(&investor, &TARGET);
+            }
+            if operation == 2 {
+                token.stellar.mint(&client.address, &TARGET);
+            }
+            if operation == 3 {
+                client.settle();
+            }
+
+            client.pause_dispute(&String::from_str(&env, "PROP_TICKET"), &duration);
+            let pause_started_at = env.ledger().timestamp();
+            env.ledger().set_timestamp(pause_started_at + before_expiry);
+
+            let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match operation {
+                0 => { LiquifactEscrow::fund(env.clone(), investor.clone(), 1); }
+                1 => { LiquifactEscrow::settle(env.clone(), None); }
+                2 => { LiquifactEscrow::withdraw(env.clone(), sme.clone()); }
+                _ => { LiquifactEscrow::claim_investor_payout(env.clone(), investor.clone()); }
+            }));
+            prop_assert!(blocked.is_err(), "operation {operation} passed before expiry");
+
+            env.ledger().set_timestamp(pause_started_at + duration + after_offset);
+            let resumed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match operation {
+                0 => { LiquifactEscrow::fund(env.clone(), investor.clone(), 1); }
+                1 => { LiquifactEscrow::settle(env.clone(), None); }
+                2 => { LiquifactEscrow::withdraw(env.clone(), sme.clone()); }
+                _ => { LiquifactEscrow::claim_investor_payout(env.clone(), investor.clone()); }
+            }));
+            prop_assert!(resumed.is_ok(), "operation {operation} remained blocked after expiry");
+        }
+    }
+
+    #[test]
+    fn prop_legal_hold_blocks_mutating_entrypoint_table(
+        start_index in 0usize..11,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, sme) = setup(&env);
+        let investor = Address::generate(&env);
+        let delegate = Address::generate(&env);
+        default_init(&client, &env, &admin, &sme);
+        client.set_legal_hold(&true, &String::from_str(&env, "property"));
+
+        for offset in 0..11 {
+            let operation = ((start_index + offset) % 11) as u8;
+            let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match operation {
+                0 => { LiquifactEscrow::update_maturity(env.clone(), 1); }
+                1 => { LiquifactEscrow::revoke_attestation_digest(env.clone(), 0); }
+                2 => {
+                    LiquifactEscrow::append_attestation_digest(
+                        env.clone(),
+                        soroban_sdk::BytesN::from_array(&env, &[7; 32]),
+                        soroban_sdk::Symbol::new(&env, "property"),
+                    );
+                }
+                3 => {
+                    LiquifactEscrow::set_yield_claim_delegate(
+                        env.clone(),
+                        investor.clone(),
+                        delegate.clone(),
+                    );
+                }
+                4 => {
+                    LiquifactEscrow::revoke_yield_claim_delegate(
+                        env.clone(),
+                        investor.clone(),
+                    );
+                }
+                5 => { LiquifactEscrow::partial_settle(env.clone(), admin.clone()); }
+                6 => { LiquifactEscrow::refund(env.clone(), investor.clone()); }
+                7 => { LiquifactEscrow::notify_settlement(env.clone()); }
+                8 => { LiquifactEscrow::set_escrow_paused(env.clone(), true); }
+                9 => { LiquifactEscrow::update_funding_target(env.clone(), TARGET + 1); }
+                _ => {
+                    LiquifactEscrow::pause_dispute(
+                        env.clone(),
+                        String::from_str(&env, "PROP_TICKET"),
+                        1,
+                    );
+                }
+            }));
+            prop_assert!(blocked.is_err(), "mutating entrypoint {operation} bypassed hold");
+        }
+
+        LiquifactEscrow::bump_ttl(env.clone(), soroban_sdk::Vec::new(&env));
+        prop_assert!(client.get_legal_hold());
+    }
+}

@@ -28,9 +28,9 @@
 //!
 //! ## Compliance hold (legal hold)
 //!
-//! An admin may set [`DataKey::LegalHold`] to block risk-bearing transitions until cleared:
-//! [`LiquifactEscrow::settle`], SME [`LiquifactEscrow::withdraw`], and
-//! [`LiquifactEscrow::claim_investor_payout`]. **Clearing** requires the **current**
+//! An admin may set [`DataKey::LegalHold`] to block state-mutating entrypoints until cleared.
+//! Hold management, admin handover, initialization, and [`LiquifactEscrow::bump_ttl`] remain
+//! available as explicit recovery/maintenance exceptions. **Clearing** requires the **current**
 //! [`InvoiceEscrow::admin`] to call [`LiquifactEscrow::set_legal_hold`] with `active = false`
 //! (or [`LiquifactEscrow::clear_legal_hold`]). This contract does not embed a timelock or
 //! council multisig: production deployments **must** use a governed `admin` (multisig or
@@ -681,6 +681,8 @@ pub enum EscrowError {
     CloneAmountNotPositive = 215,
     /// Template or initial funding target is invalid (not positive).
     InvalidFundingTarget = 216,
+    /// A state-mutating entrypoint was called while a legal hold is active.
+    LegalHoldBlocksMutation = 217,
 }
 
 #[inline(always)]
@@ -2339,6 +2341,14 @@ impl LiquifactEscrow {
             .unwrap_or(false)
     }
 
+    fn ensure_legal_hold_inactive(env: &Env) {
+        ensure(
+            env,
+            !Self::legal_hold_active(env),
+            EscrowError::LegalHoldBlocksMutation,
+        );
+    }
+
     /// Whether the escrow is currently paused by the admin.
     fn escrow_paused_active(env: &Env) -> bool {
         env.storage()
@@ -3225,6 +3235,12 @@ impl LiquifactEscrow {
     /// that never configured [`DataKey::AdminRoles`] (the `admin` field is implicitly `Full`),
     /// but correctly rejects the call if an operator explicitly demoted `admin`'s own role.
     fn load_escrow_require_admin(env: &Env) -> InvoiceEscrow {
+        Self::ensure_legal_hold_inactive(env);
+        Self::load_escrow_require_admin_during_hold(env)
+    }
+
+    /// Admin authorization path reserved for legal-hold recovery controls and admin handover.
+    fn load_escrow_require_admin_during_hold(env: &Env) -> InvoiceEscrow {
         let escrow: InvoiceEscrow = env
             .storage()
             .instance()
@@ -3240,6 +3256,7 @@ impl LiquifactEscrow {
     /// Consolidates the repeated `let escrow = Self::get_escrow(env.clone()); escrow.sme_address.require_auth();`
     /// pattern used across multiple SME-gated entrypoints.
     fn load_escrow_require_sme(env: &Env) -> InvoiceEscrow {
+        Self::ensure_legal_hold_inactive(env);
         let escrow: InvoiceEscrow = env
             .storage()
             .instance()
@@ -4117,6 +4134,7 @@ impl LiquifactEscrow {
     }
 
     pub fn revoke_attestation_digest(env: Env, index: u32) {
+        Self::ensure_legal_hold_inactive(&env);
         let escrow = Self::get_escrow(env.clone());
         escrow.admin.require_auth();
 
@@ -4271,7 +4289,7 @@ impl LiquifactEscrow {
     /// `propose_admin`, `accept_admin`, then `clear_legal_hold`. See
     /// `docs/escrow-legal-hold.md`.
     pub fn set_legal_hold(env: Env, active: bool, reason: String) {
-        let escrow = Self::load_escrow_require_admin(&env);
+        let escrow = Self::load_escrow_require_admin_during_hold(&env);
 
         if active && escrow.guardian.is_some() {
             fail(&env, EscrowError::LegalHoldRequiresGuardianConfirmation);
@@ -4496,7 +4514,7 @@ impl LiquifactEscrow {
     /// |-----------|-------------|
     /// | `timestamp + delay` overflows | [`EscrowError::LegalHoldClearDelayOverflow`] |
     pub fn request_clear_legal_hold(env: Env) {
-        let escrow = Self::load_escrow_require_admin(&env);
+        let escrow = Self::load_escrow_require_admin_during_hold(&env);
 
         let now = env.ledger().timestamp();
         let delay = Self::get_legal_hold_clear_delay(env.clone());
@@ -5814,10 +5832,7 @@ impl LiquifactEscrow {
     pub fn partial_settle(env: Env, caller: Address) -> InvoiceEscrow {
         caller.require_auth();
 
-        assert!(
-            !Self::legal_hold_active(&env),
-            "Legal hold blocks partial settlement"
-        );
+        Self::ensure_legal_hold_inactive(&env);
 
         let mut escrow = Self::get_escrow(env.clone());
 
@@ -5942,6 +5957,7 @@ impl LiquifactEscrow {
     /// Emits [`EscrowError::SettlementNotifierNotSet`] when no notifier was configured at init.
     /// Emits [`EscrowError::InvestorClaimNotSettled`] (127) when escrow status is not `2` (settled).
     pub fn notify_settlement(env: Env) {
+        Self::ensure_legal_hold_inactive(&env);
         let escrow = Self::get_escrow(env.clone());
 
         ensure(
@@ -6281,6 +6297,11 @@ impl LiquifactEscrow {
 
         // Load and validate the template escrow.
         let template_escrow = template_client.get_escrow();
+        ensure(
+            &env,
+            !template_client.get_legal_hold(),
+            EscrowError::LegalHoldBlocksMutation,
+        );
         ensure(
             &env,
             template_escrow.status == 2,
@@ -6959,6 +6980,7 @@ impl LiquifactEscrow {
     /// # Errors
     /// - [`EscrowError::DelegateAddressSameAsInvestor`] if `delegate == investor`.
     pub fn set_yield_claim_delegate(env: Env, investor: Address, delegate: Address) {
+        Self::ensure_legal_hold_inactive(&env);
         ensure(
             &env,
             investor != delegate,
@@ -6992,6 +7014,7 @@ impl LiquifactEscrow {
     /// # Errors
     /// - [`EscrowError::NoActiveDelegation`] if the investor has no active delegation to revoke.
     pub fn revoke_yield_claim_delegate(env: Env, investor: Address) {
+        Self::ensure_legal_hold_inactive(&env);
         investor.require_auth();
 
         // Verify there is an active delegation to revoke.
@@ -7034,6 +7057,7 @@ impl LiquifactEscrow {
     /// - [`EscrowError::ReinvestTargetEscrowNotFunding`] if the target is not in funding state.
     /// - [`EscrowError::ReinvestYieldInsufficient`] if `amount` exceeds the investor's accrued yield.
     pub fn reinvest_yield(env: Env, investor: Address, target_escrow: Address, amount: i128) {
+        Self::ensure_legal_hold_inactive(&env);
         investor.require_auth();
         ensure(&env, amount > 0, EscrowError::ReinvestAmountNotPositive);
 
@@ -7050,6 +7074,16 @@ impl LiquifactEscrow {
             &target_escrow,
             &Symbol::new(&env, "get_escrow"),
             soroban_sdk::vec![&env],
+        );
+        let target_legal_hold: bool = env.invoke_contract(
+            &target_escrow,
+            &Symbol::new(&env, "get_legal_hold"),
+            soroban_sdk::vec![&env],
+        );
+        ensure(
+            &env,
+            !target_legal_hold,
+            EscrowError::LegalHoldBlocksMutation,
         );
         ensure(
             &env,
@@ -7544,7 +7578,7 @@ impl LiquifactEscrow {
     /// Emits typed [`EscrowError`] codes when the escrow is uninitialized or `new_admin` is the
     /// current admin.
     pub fn propose_admin(env: Env, new_admin: Address) -> Address {
-        let escrow = Self::load_escrow_require_admin(&env);
+        let escrow = Self::load_escrow_require_admin_during_hold(&env);
 
         ensure(
             &env,
@@ -7679,6 +7713,7 @@ impl LiquifactEscrow {
     /// refundable contribution, initialized token data is missing, or the refund transfer fails
     /// token-balance invariants.
     pub fn refund(env: Env, investor: Address) {
+        Self::ensure_legal_hold_inactive(&env);
         ensure(
             &env,
             !Self::escrow_paused_active(&env),

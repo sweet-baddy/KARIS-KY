@@ -791,11 +791,11 @@ fn clear_legal_hold_when_already_false_is_idempotent() {
     assert!(!client.get_legal_hold());
 }
 
-// ── 13. Non-gated operations are NOT blocked by hold ─────────────────────────
+// ── 13. Recovery controls remain available under hold ────────────────────────
 
-/// `update_maturity`, admin handover, and getters must all work under hold.
+/// Mutations are blocked under hold except explicit recovery controls; getters remain available.
 #[test]
-fn non_risk_operations_not_blocked_by_hold() {
+fn hold_blocks_configuration_but_allows_recovery_and_getters() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     init_open(&client, &env, &admin, &sme, "LHN002");
@@ -809,11 +809,13 @@ fn non_risk_operations_not_blocked_by_hold() {
     assert_eq!(escrow.status, 0u32);
     assert!(client.get_legal_hold());
 
-    // `update_maturity` must not be blocked.
-    let updated = client.update_maturity(&9999u64);
-    assert_eq!(updated.maturity, 9999u64);
+    // Ordinary configuration changes must be blocked.
+    assert_contract_error(
+        client.try_update_maturity(&9999u64),
+        EscrowError::LegalHoldBlocksMutation,
+    );
 
-    // Two-step admin handover must not be blocked.
+    // Two-step admin handover remains available as a hold recovery path.
     let new_admin = Address::generate(&env);
     client.propose_admin(&new_admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));

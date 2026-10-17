@@ -2715,6 +2715,43 @@ fn test_refund_multiple_investors_independent() {
 }
 
 #[test]
+fn test_refund_three_investors_exactly_once() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investors = [
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+    ];
+    let amounts = [TARGET / 5, TARGET / 4, TARGET / 3];
+    let total: i128 = amounts.iter().sum();
+    let (token, _) = init_with_token(&env, &client, &admin, &sme);
+    token.stellar.mint(&client.address, &total);
+
+    for (investor, amount) in investors.iter().zip(amounts.iter()) {
+        client.fund(investor, amount);
+    }
+    client.cancel_funding();
+
+    let balances_before = [
+        token.token.balance(&investors[0]),
+        token.token.balance(&investors[1]),
+        token.token.balance(&investors[2]),
+    ];
+    for (index, (investor, amount)) in investors.iter().zip(amounts.iter()).enumerate() {
+        assert!(!client.is_investor_refunded(investor));
+        client.refund(investor);
+        assert_eq!(token.token.balance(investor) - balances_before[index], *amount);
+        assert!(client.is_investor_refunded(investor));
+        assert_eq!(client.get_contribution(investor), 0);
+        assert_contract_error(
+            client.try_refund(investor),
+            EscrowError::NoContributionToRefund,
+        );
+    }
+}
+
+#[test]
 fn test_cancel_funding_preserves_funded_amount() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
