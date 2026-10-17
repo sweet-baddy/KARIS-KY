@@ -145,11 +145,11 @@ if ! stellar contract fetch \
     --network-passphrase "${NETWORK_PASSPHRASE}" \
     --out "${FETCHED_WASM}" \
     >"${WORKDIR}/fetch.out" 2>"${FETCH_ERR}"; then
-  fail "stellar contract fetch failed: $(cat ${FETCH_ERR})"
+  fail "stellar contract fetch failed: $(cat "${FETCH_ERR}")"
 fi
 
 if [ ! -s "${FETCHED_WASM}" ]; then
-  fail "Fetched WASM is empty: $(cat ${FETCH_ERR})"
+  fail "Fetched WASM is empty: $(cat "${FETCH_ERR}")"
 fi
 
 DEPLOYED_HASH=$(sha256_of "${FETCHED_WASM}")
@@ -178,14 +178,14 @@ if ! stellar contract invoke \
     --network-passphrase "${NETWORK_PASSPHRASE}" \
     -- get_version \
     >"${GV_OUT}" 2>"${GV_ERR}"; then
-  fail "get_version invocation failed: $(cat ${GV_ERR})"
+  fail "get_version invocation failed: $(cat "${GV_ERR}")"
 fi
 
 # The Stellar CLI prints the return value followed by logs. Parse the first number.
 RAW_VERSION=$(grep -oE '[0-9]+' "${GV_OUT}" | head -1 || true)
 
 if [ -z "${RAW_VERSION}" ]; then
-  fail "Could not parse version from get_version output: $(cat ${GV_OUT})"
+  fail "Could not parse version from get_version output: $(cat "${GV_OUT}")"
 fi
 
 info "get_version returned: ${RAW_VERSION}"
@@ -219,7 +219,7 @@ invoke_or_fail() {
     # and indicates the entrypoint is accessible. We only fail on transport
     # errors (RPC unreachable, malformed contract, missing WASM, etc.).
     if grep -qiE "network error|rpc error|connect|timeout|panic|transport|http error" "${err}"; then
-      fail "Entrypoint '${entry}' unreachable: $(cat ${err})"
+      fail "Entrypoint '${entry}' unreachable: $(cat "${err}")"
     fi
   fi
 }
@@ -256,7 +256,7 @@ if [ -n "${EXPECTED_ADMIN}" ] || [ -n "${EXPECTED_INVOICE_ID}" ] || [ -n "${EXPE
     if grep -qiE "NotInitialized|not.*initialized" "${ESCROW_ERR}" "${ESCROW_OUT}" 2>/dev/null; then
       warn "Contract not yet initialized — skipping state config verification"
     else
-      fail "get_escrow failed: $(cat ${ESCROW_ERR})"
+      fail "get_escrow failed: $(cat "${ESCROW_ERR}")"
     fi
   else
     ESCROW_DUMP="${ESCROW_OUT}"
@@ -289,7 +289,7 @@ if [ -n "${EXPECTED_ADMIN}" ] || [ -n "${EXPECTED_INVOICE_ID}" ] || [ -n "${EXPE
         --network-passphrase "${NETWORK_PASSPHRASE}" \
         -- get_funding_token \
         >"${FT_OUT}" 2>"${FT_ERR}"; then
-      fail "get_funding_token failed: $(cat ${FT_ERR})"
+      fail "get_funding_token failed: $(cat "${FT_ERR}")"
     fi
 
     if grep -qF "${EXPECTED_FUNDING_TOKEN}" "${FT_OUT}"; then

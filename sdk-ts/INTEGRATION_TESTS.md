@@ -287,8 +287,8 @@ it("should validate custom parameter", async () => {
 
 ## Documentation
 
-- **[Escrow Init Parameters](docs/escrow-init-parameters.md)** - Detailed parameter reference
-- **[Error Code Reference](docs/escrow-error-messages.md)** - Typed error codes
+- **[Escrow Init Parameters](../docs/escrow-init-parameters.md)** - Detailed parameter reference
+- **[Error Code Reference](../docs/escrow-error-messages.md)** - Typed error codes
 - **[Contract ABI Spec](spec.json)** - Machine-readable specification
 
 ## Notes

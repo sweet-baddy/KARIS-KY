@@ -6,32 +6,65 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
+  markdown-links:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check repository-relative Markdown links
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2
+        with:
+          args: --offline --no-progress --verbose --exclude-path '(^|/)node_modules(/|$)' '**/*.md'
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install ShellCheck and lint deployment scripts
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+          shellcheck \
+            scripts/deploy.sh \
+            scripts/local-env.sh \
+            scripts/pre-flight-checklist.sh \
+            scripts/canary-smoke-test.sh \
+            scripts/verify_deployment.sh
+
   secret-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   fmt-build-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           components: rustfmt, clippy, llvm-tools-preview
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Check formatting
         run: cargo fmt -p karis_ky_escrow -- --check
@@ -49,7 +82,7 @@ jobs:
         run: cargo audit --deny warnings
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@cargo-deny
+        uses: taiki-e/install-action@c95a8e71b2aa92ca779c9c822b9d41038c0fc503 # cargo-deny
 
       - name: Run cargo-deny (licenses, bans, advisories)
         run: cargo deny check
@@ -63,7 +96,7 @@ jobs:
           INSTA_FORCE_ACCEPT: "false"
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@671164c891d3e20f5b8ece04798d0154d1262d65 # cargo-llvm-cov
 
       - name: Add WASM target
         run: rustup target add wasm32-unknown-unknown
@@ -147,7 +180,7 @@ jobs:
 
       - name: Upload WASM size report artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wasm-size-report
           path: /tmp/wasm_size_report.md
@@ -155,7 +188,7 @@ jobs:
 
       - name: Upload WASM artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: karis-ky-escrow-wasm
           path: target/wasm32-unknown-unknown/release/karis_ky_escrow.wasm
@@ -198,7 +231,7 @@ jobs:
 
       - name: Upload contract spec artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: karis-ky-escrow-spec
           path: sdk-ts/spec.json
@@ -248,10 +281,10 @@ jobs:
       matrix:
         package: [sdk-ts, sdk, docs]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
 

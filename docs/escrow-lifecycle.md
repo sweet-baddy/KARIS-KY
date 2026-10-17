@@ -64,7 +64,7 @@ reducing transaction overhead for primary issuance workflows.
 **Semantics:**
 - Each entry `(investor_address, amount)` is processed sequentially
 - Per-investor `require_auth()` is called for each entry
-- All existing [`fund()`](funding.md) invariants (allowlist, caps, min contribution, overflow guards)
+- All existing [`fund()`](../escrow/src/lib.rs#L1444) invariants (allowlist, caps, min contribution, overflow guards)
   are enforced per entry
 - One `EscrowFunded` event is emitted per entry
 - If any entry fails its invariants, the call returns an error **without corrupting prior entries**

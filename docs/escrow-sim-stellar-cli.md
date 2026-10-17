@@ -1104,5 +1104,5 @@ escrow> quit
 
 ### See Also
 
-- [repl-cli/README.md](../../repl-cli/README.md) — Full REPL documentation
+- [repl-cli/README.md](../repl-cli/README.md) — Full REPL documentation
 - [FEATURE_220_REPL_DESIGN.md](../FEATURE_220_REPL_DESIGN.md) — Design specification

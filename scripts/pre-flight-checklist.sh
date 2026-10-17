@@ -2,7 +2,8 @@
 
 set -u
 
-readonly SCRIPT_NAME="$(basename "$0")"
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
 readonly NETWORK="${STELLAR_NETWORK:-local}"
 readonly CONTRACT_ID="${CONTRACT_ID:-${LIQUIFACT_CONTRACT_ID:-}}"
 readonly CHECK_TIMEOUT_SECS="${CHECK_TIMEOUT_SECS:-30}"

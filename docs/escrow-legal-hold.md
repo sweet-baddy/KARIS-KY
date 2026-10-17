@@ -141,10 +141,10 @@ lost or destroyed:
 
 **On-chain recovery (only path):**
 
-1. Governance executes [`propose_admin`](../../escrow/src/lib.rs) using a
+1. Governance executes [`propose_admin`](../escrow/src/lib.rs) using a
    **still-available** current-admin authorization (e.g. remaining multisig
    signers or DAO vote output). This entrypoint is **not** blocked by the hold.
-2. The proposed successor executes [`accept_admin`](../../escrow/src/lib.rs)
+2. The proposed successor executes [`accept_admin`](../escrow/src/lib.rs)
    with its own authorization. This promotes the successor into
    `InvoiceEscrow::admin` and clears `DataKey::PendingAdmin`.
 3. The **new** admin calls `clear_legal_hold` (or `set_legal_hold(false)`).

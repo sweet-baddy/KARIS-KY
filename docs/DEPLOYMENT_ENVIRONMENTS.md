@@ -19,8 +19,8 @@ procedure per environment.
 | Environment | Config file | Network | RPC URL | Was it the real money? |
 |-------------|------------|---------|---------|------------------------|
 | Testnet | [`.env.testnet`](../.env.testnet) | `testnet` | `https://soroban-testnet.stellar.org` | No |
-| Staging | [`.env.staging`](../.env.staging) | `staging` | internal staging RPC | No (mirror topology) |
-| Mainnet | [`.env.mainnet`](../.env.mainnet) | `mainnet` | `https://soroban-mainnet.stellar.org` | **Yes** |
+| Staging | `.env.staging` | `staging` | internal staging RPC | No (mirror topology) |
+| Mainnet | `.env.mainnet` | `mainnet` | `https://soroban-mainnet.stellar.org` | **Yes** |
 
 Schema version: **7** — must match `pub const SCHEMA_VERSION` in `escrow/src/lib.rs`. Interface version: **2**.
 

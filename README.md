@@ -260,7 +260,7 @@ instance. That map is intentionally bounded.
 ## Test organization
 
 Escrow tests are organized by feature area under
-[`escrow/src/test/`](escrow/src/test):
+[`escrow/src/tests/`](escrow/src/tests/):
 
 | File | Coverage area |
 |------|--------------|
@@ -271,7 +271,7 @@ Escrow tests are organized by feature area under
 | `integration.rs` | External token-wrapper assumptions, metadata-only integration checks |
 | `properties.rs` | Proptest-based invariants |
 
-Shared helpers live in [`escrow/src/test.rs`](escrow/src/test.rs). Each test
+Shared helpers live in [`escrow/src/tests.rs`](escrow/src/tests.rs). Each test
 creates its own fresh `Env` so feature modules do not rely on hidden
 cross-test state.
 
