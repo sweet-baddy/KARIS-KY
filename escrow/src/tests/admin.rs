@@ -293,6 +293,12 @@ fn test_verify_asset_custody_reports_signed_discrepancy() {
 
     let discrepancy = client.verify_asset_custody();
     assert_eq!(discrepancy, 200i128);
+
+    let recipient = Address::generate(&env);
+    token.token.transfer(&client.address, &recipient, &300i128);
+
+    let discrepancy = client.verify_asset_custody();
+    assert_eq!(discrepancy, -100i128);
 }
 
 #[test]
