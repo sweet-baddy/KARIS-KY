@@ -4,6 +4,8 @@ Soroban smart contracts for karis-ky, the invoice liquidity network on Stellar.
 This repository contains the `escrow` contract that holds investor funds for
 tokenized invoices until settlement and is maintained under the `karis-ky` project name.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, test commands, and contribution guidelines.
+
 ---
 
 ## FAQ
@@ -237,7 +239,7 @@ cargo clippy --all-targets -- -D warnings
 | `bind_primary_attestation_hash` | Admin sets a single-write 32-byte digest. |
 | `append_attestation_digest` | Admin appends to bounded audit log. |
 | `record_sme_collateral_commitment` | SME records collateral pledge (metadata only). |
-| `check_escrow_health` | Compute and return current escrow health metrics (warning code, funding ratio bps, time to maturity secs). Emits optional non-blocking warning event. See [ADR-008](docs/adr/ADR-008-escrow-health-warnings.md) for codes (4001–4004). |
+| `check_escrow_health` | Compute and return current escrow health metrics (warning code, funding ratio bps, time to maturity secs). Emits optional non-blocking warning event. See [ADR-013](docs/adr/ADR-013-escrow-health-warnings.md) for codes (4001–4004). |
 | `get_escrow` | Read current escrow state. |
 | `get_version` | Read stored `DataKey::Version`. |
 

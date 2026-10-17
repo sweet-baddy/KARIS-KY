@@ -19,7 +19,7 @@ FundingCloseSnapshot did not validate that the snapshot timestamp was before the
 - 4 tests covering all scenarios
 
 ### Documentation
-- **ADR-008 updated:** `docs/adr/ADR-008-escrow-health-warnings.md:51`
+- **ADR-013 updated:** `docs/adr/ADR-013-escrow-health-warnings.md:51`
 - Warning type 4004 now defined as "FundingClosedAfterMaturity"
 
 ## Verification
@@ -35,7 +35,7 @@ cargo test test_funding_close_snapshot_no_maturity_constraint --lib -- --nocaptu
 ## What Changed?
 - Added ~100 lines of validation code (2 locations, both handling same logic)
 - Added ~243 lines of test code (4 comprehensive test cases)
-- Updated 1 line in ADR-008 documentation
+- Updated 1 line in ADR-013 documentation
 - No breaking changes, no storage mutations, event-only
 
 ## Event Details
@@ -56,6 +56,6 @@ Off-chain systems detect warning and alert operators
 ```
 
 ## Related Documentation
-- **ADR-008:** Health Warning System - `docs/adr/ADR-008-escrow-health-warnings.md`
+- **ADR-013:** Health Warning System - `docs/adr/ADR-013-escrow-health-warnings.md`
 - **Main README:** Search for "FundingCloseSnapshot"
 - **Init Parameters:** `docs/escrow-init-parameters.md`

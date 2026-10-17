@@ -327,7 +327,7 @@ Ok(Command::MyNewCommand { arg }) => {
 ## Documentation
 
 For more information on the KARIS-KY contract health check implementation, see:
-- `docs/adr/ADR-008-escrow-health-warnings.md` - Architecture decision record
+- `docs/adr/ADR-013-escrow-health-warnings.md` - Architecture decision record
 - `FEATURE_220_REPL_DESIGN.md` - Full REPL CLI design specification
 - `escrow/src/lib.rs` - Contract implementation
 

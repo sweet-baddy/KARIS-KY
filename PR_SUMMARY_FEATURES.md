@@ -61,8 +61,8 @@ This PR implements two production-ready features for improved escrow monitoring 
 
 | Document | Purpose |
 |----------|---------|
-| ADR-008 | Architecture decision record for health warnings |
-| ADR-009 | Architecture decision record for delta snapshots |
+| ADR-013 | Architecture decision record for health warnings |
+| ADR-015 | Architecture decision record for delta snapshots |
 | DESIGN_HEALTH_AND_DELTAS.md | Comprehensive design covering both features |
 | VERIFICATION_CHECKLIST.md | Detailed verification of all requirements |
 | IMPLEMENTATION_SUMMARY.md | Executive summary and deployment guide |
@@ -96,8 +96,8 @@ escrow/src/tests/health_warnings.rs (NEW)
 escrow/src/tests/delta_snapshots.rs (NEW)
   + 8 delta snapshot unit tests
 
-docs/adr/ADR-008-escrow-health-warnings.md (NEW)
-docs/adr/ADR-009-delta-encoded-snapshots.md (NEW)
+docs/adr/ADR-013-escrow-health-warnings.md (NEW)
+docs/adr/ADR-015-delta-encoded-snapshots.md (NEW)
 DESIGN_HEALTH_AND_DELTAS.md (NEW)
 IMPLEMENTATION_SUMMARY.md (NEW)
 VERIFICATION_CHECKLIST.md (NEW)
@@ -164,8 +164,8 @@ VERIFICATION_CHECKLIST.md (NEW)
 
 ## Questions & Support
 
-- **Health warnings**: See ADR-008, docs/adr/ADR-008-escrow-health-warnings.md
-- **Delta snapshots**: See ADR-009, docs/adr/ADR-009-delta-encoded-snapshots.md
+- **Health warnings**: See ADR-013, docs/adr/ADR-013-escrow-health-warnings.md
+- **Delta snapshots**: See ADR-015, docs/adr/ADR-015-delta-encoded-snapshots.md
 - **Design rationale**: See DESIGN_HEALTH_AND_DELTAS.md
 - **Testing coverage**: See VERIFICATION_CHECKLIST.md
 - **Deployment guide**: See IMPLEMENTATION_SUMMARY.md
@@ -179,7 +179,7 @@ VERIFICATION_CHECKLIST.md (NEW)
 - [x] 15 comprehensive unit tests passing
 - [x] Backward compatibility verified
 - [x] No schema version bump required
-- [x] ADRs created (ADR-008, ADR-009)
+- [x] ADRs created (ADR-013, ADR-015)
 - [x] Design documentation complete
 - [x] No breaking changes
 - [x] Ready for production deployment

@@ -431,7 +431,7 @@ When both are enabled:
 - [ ] Write unit tests for both features.
 - [ ] Write integration tests (happy path + edge cases).
 - [ ] Add fuzz tests for delta chain integrity.
-- [ ] Update ADR documents (ADR-008, ADR-009).
+- [ ] Update ADR documents (ADR-013, ADR-015).
 - [ ] Verify no compilation errors (`cargo build`, `cargo clippy`).
 - [ ] Run full test suite and achieve 95% coverage.
 - [ ] Update error messages documentation.

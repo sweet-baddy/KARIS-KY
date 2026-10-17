@@ -39,7 +39,7 @@
 - [x] Graceful emission (code 0 is silent)
 
 ### Documentation ✅
-- [x] ADR-008 created with full design rationale
+- [x] ADR-013 created with full design rationale
 - [x] Warning type codes documented
 - [x] Health computation logic documented
 - [x] Emission points documented
@@ -82,7 +82,7 @@
 - [x] Optional adoption (new instances can opt-in)
 
 ### Documentation ✅
-- [x] ADR-009 created with full design rationale
+- [x] ADR-015 created with full design rationale
 - [x] SnapshotDelta structure documented
 - [x] Reconstruction algorithm documented
 - [x] Immutability guarantees documented
@@ -176,8 +176,8 @@
 ### New Files Created ✅
 - [x] `/workspaces/KARIS-KY/escrow/src/tests/health_warnings.rs` (303 lines)
 - [x] `/workspaces/KARIS-KY/escrow/src/tests/delta_snapshots.rs` (366 lines)
-- [x] `/workspaces/KARIS-KY/docs/adr/ADR-008-escrow-health-warnings.md` (190 lines)
-- [x] `/workspaces/KARIS-KY/docs/adr/ADR-009-delta-encoded-snapshots.md` (216 lines)
+- [x] `/workspaces/KARIS-KY/docs/adr/ADR-013-escrow-health-warnings.md` (190 lines)
+- [x] `/workspaces/KARIS-KY/docs/adr/ADR-015-delta-encoded-snapshots.md` (216 lines)
 - [x] `/workspaces/KARIS-KY/DESIGN_HEALTH_AND_DELTAS.md` (446 lines)
 - [x] `/workspaces/KARIS-KY/IMPLEMENTATION_SUMMARY.md` (268 lines)
 

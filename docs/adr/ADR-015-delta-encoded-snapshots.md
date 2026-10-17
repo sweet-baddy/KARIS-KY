@@ -1,4 +1,4 @@
-# ADR-009: Delta-Encoded State Snapshots
+# ADR-015: Delta-Encoded State Snapshots
 
 **Status:** Accepted  
 **Date:** 2026-07-28  

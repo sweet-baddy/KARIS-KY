@@ -44,7 +44,7 @@ When snapshot timestamp >= maturity, emit `EscrowHealthWarning` with:
 - Identical validation block (code reuse pattern from ADR-001: DRY principle)
 - Ensures both funding paths properly validate maturity
 
-#### File: `/workspaces/KARIS-KY/docs/adr/ADR-008-escrow-health-warnings.md`
+#### File: `/workspaces/KARIS-KY/docs/adr/ADR-013-escrow-health-warnings.md`
 
 **Updated Warning Type Documentation:**
 - Changed code 4004 from "FundingStalled (reserved)" to "FundingClosedAfterMaturity"
@@ -85,7 +85,7 @@ All tests added to `/workspaces/KARIS-KY/escrow/src/tests/funding.rs`:
 - [x] Edge cases handled (maturity=0, negative time_to_maturity_secs)
 - [x] Overflow guards in place (saturating arithmetic)
 - [x] Event properly formatted (EscrowHealthWarning struct)
-- [x] Documentation updated (ADR-008)
+- [x] Documentation updated (ADR-013)
 - [x] Warning code properly registered (4004)
 - [x] No breaking changes (event-only, no storage changes)
 
@@ -111,7 +111,7 @@ All tests added to `/workspaces/KARIS-KY/escrow/src/tests/funding.rs`:
 ### 3. Event Type Code Selection
 **Decision:** Use 4004 (previously reserved)
 **Rationale:**
-- Code 4004 was already reserved for future use in ADR-008
+- Code 4004 was already reserved for future use in ADR-013
 - Fits the pattern of health warning codes (4001-4004)
 - Clear separation from other warning types
 
@@ -142,13 +142,13 @@ All tests added to `/workspaces/KARIS-KY/escrow/src/tests/funding.rs`:
 |------|---------|-------|
 | escrow/src/lib.rs | Added maturity validation in fund_impl() and partial_settle() | ~100 total |
 | escrow/src/tests/funding.rs | Added 4 comprehensive tests | ~243 total |
-| docs/adr/ADR-008-escrow-health-warnings.md | Updated warning type 4004 documentation | 1 |
+| docs/adr/ADR-013-escrow-health-warnings.md | Updated warning type 4004 documentation | 1 |
 
 ---
 
 ## Related Issues & References
 - **Issue:** BUG-013
-- **ADR:** ADR-008-escrow-health-warnings.md (defines health warning system)
+- **ADR:** ADR-013-escrow-health-warnings.md (defines health warning system)
 - **Event:** EscrowHealthWarning (published in lib.rs line ~1943)
 - **Entrypoint:** check_escrow_health() (reads health metrics)
 

@@ -48,7 +48,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 [`docs/ESCROW_BENEFICIARY_ROTATION.md`](ESCROW_BENEFICIARY_ROTATION.md),
 [`docs/escrow-state-snapshots.md`](escrow-state-snapshots.md),
 [`docs/adr/ADR-006-dust-sweep-and-token-safety.md`](adr/ADR-006-dust-sweep-and-token-safety.md), and
-[`docs/adr/ADR-008-state-snapshots.md`](adr/ADR-008-state-snapshots.md).
+[`docs/adr/ADR-014-state-snapshots.md`](adr/ADR-014-state-snapshots.md).
 
 ## Canonical Reference Table
 

@@ -15,6 +15,10 @@ Key design decisions for the karis-ky escrow contract.
 | [ADR-009](ADR-009-per-investor-persistent-storage.md) | Per-Investor Keys in Persistent Storage — TTL, Footprint, and Migration | Accepted |
 | [ADR-010](ADR-010-batch_fund-design.md) | Batch Funding Design — Multi-Investor Funding in a Single Call | Accepted |
 | [ADR-011](ADR-011-governance-voting.md) | Governance Voting Mechanism | Accepted |
+| [ADR-012](ADR-012-investor-storage-sharding.md) | Investor Storage Sharding | Accepted |
+| [ADR-013](ADR-013-escrow-health-warnings.md) | Escrow Health Warning System | Accepted |
+| [ADR-014](ADR-014-state-snapshots.md) | State Snapshot Recovery and Rollback | Accepted |
+| [ADR-015](ADR-015-delta-encoded-snapshots.md) | Delta-Encoded State Snapshots | Accepted |
 
 > **Reading order for v5 → v6:** Read [ADR-007](ADR-007-storage-key-evolution.md) (policy, `Rule 5`) first for the high-level additive-key policy; then read [ADR-009](ADR-009-per-investor-persistent-storage.md) for the dedicated rationale, TTL/footprint tradeoffs, and the operator-facing v5 → v6 redeploy plan.
 

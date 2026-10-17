@@ -36,7 +36,7 @@ Implement a public, read-only contract entrypoint `check_escrow_health()` that p
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| Define four warning type codes (4001–4004) | ✓ Implemented | Codes defined in ADR-008 |
+| Define four warning type codes (4001–4004) | ✓ Implemented | Codes defined in ADR-013 |
 | Compute funded ratio in basis points | ✓ Implemented | `(funded / target) * 10_000` |
 | Compute time to maturity in seconds | ✓ Implemented | `maturity - now`; returns `i64::MAX` if no constraint |
 | Emit warning event at fund, settle, claim transitions | ✓ Implemented | Hooked into `fund_impl()`, `settle()`, `claim_investor_payout()` |
@@ -360,6 +360,6 @@ The following priority order ensures exactly one warning is emitted:
 
 ## 12. References
 
-- [ADR-008: Escrow Health Warning System](docs/adr/ADR-008-escrow-health-warnings.md)
+- [ADR-013: Escrow Health Warning System](docs/adr/ADR-013-escrow-health-warnings.md)
 - [FEATURE_220_REPL_DESIGN.md](FEATURE_220_REPL_DESIGN.md)
 - Related: FEAT-010 (REPL), FEAT-011 (Health Check)

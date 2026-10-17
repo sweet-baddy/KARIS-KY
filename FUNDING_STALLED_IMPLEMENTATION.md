@@ -97,7 +97,7 @@ Added 6 comprehensive test cases:
 
 ### 3. Documentation Updates
 
-#### ADR-008-escrow-health-warnings.md
+#### ADR-013-escrow-health-warnings.md
 Updated the Architecture Decision Record with:
 
 **Warning Type Code:** Code 4004 now fully specified:
@@ -125,7 +125,7 @@ else:
 #### README.md
 Updated public entrypoints table to document `check_escrow_health`:
 - Returns `(warning_type, funded_ratio_bps, time_to_maturity_secs)`
-- Links to ADR-008 for warning codes 4001–4004
+- Links to ADR-013 for warning codes 4001–4004
 
 ---
 
@@ -178,7 +178,7 @@ Code 4004 (stalled) takes priority over code 4003 (over-maturity) because:
 - Covers: threshold exceeded, threshold not exceeded, not configured, funded escrows, never-funded
 
 ✅ **Specification and README updated**
-- ADR-008 fully documented with implementation details
+- ADR-013 fully documented with implementation details
 - README.md entrypoint table includes `check_escrow_health` with reference
 - All warning codes (4001-4004) documented
 
@@ -261,7 +261,7 @@ assert_eq!(warning, 4004); // Funding stalled!
 |------|---------|
 | `/workspaces/KARIS-KY/escrow/src/lib.rs` | Added DataKey variants, updated compute_and_emit_health_warning, updated fund_impl, updated init signature |
 | `/workspaces/KARIS-KY/escrow/src/tests/health_warnings.rs` | Added 6 new test cases |
-| `/workspaces/KARIS-KY/docs/adr/ADR-008-escrow-health-warnings.md` | Updated warning codes table, computation logic, storage keys, testing section |
+| `/workspaces/KARIS-KY/docs/adr/ADR-013-escrow-health-warnings.md` | Updated warning codes table, computation logic, storage keys, testing section |
 | `/workspaces/KARIS-KY/README.md` | Added check_escrow_health to entrypoint table |
 
 ---

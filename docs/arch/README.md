@@ -183,7 +183,7 @@ Schema version 6 moved per-investor keys to persistent storage to avoid instance
 
 For context on design decisions and operational procedures:
 
-- **[docs/adr/](../adr/)** — Architecture Decision Records (ADR-001 through ADR-008)
+- **[docs/adr/](../adr/)** — Architecture Decision Records (ADR-001 through ADR-015)
 - **[docs/OPERATOR_RUNBOOK.md](../OPERATOR_RUNBOOK.md)** — Deployment, migration, and rollback procedures
 - **[docs/escrow-data-model.md](../escrow-data-model.md)** — Detailed data model explanation
 - **[docs/escrow-security-checklist.md](../escrow-security-checklist.md)** — Security review checklist

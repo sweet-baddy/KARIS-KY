@@ -42,7 +42,7 @@
 **Evidence:** 6 comprehensive test cases added to `/workspaces/KARIS-KY/escrow/src/tests/health_warnings.rs`
 
 ### Criterion 4: Specification and README updated
-- [x] ADR-008 updated:
+- [x] ADR-013 updated:
   - Warning codes table includes 4004 with condition
   - Health computation logic explains staleness detection  
   - Storage section documents FundingStallThresholdSecs and LastFundLedgerTimestamp
@@ -50,10 +50,10 @@
   
 - [x] README.md updated:
   - `check_escrow_health` added to entrypoint table (line 196)
-  - Links to ADR-008 for codes 4001–4004
+  - Links to ADR-013 for codes 4001–4004
   
 **Evidence:** 
-- `/workspaces/KARIS-KY/docs/adr/ADR-008-escrow-health-warnings.md` fully updated
+- `/workspaces/KARIS-KY/docs/adr/ADR-013-escrow-health-warnings.md` fully updated
 - `/workspaces/KARIS-KY/README.md` line 196 documents check_escrow_health
 
 ### Criterion 5: CI passes
@@ -103,7 +103,7 @@
   - [x] `test_funding_stalled_never_funded_escrow()` (line 498)
 
 ### Documentation Changes
-- [x] **File:** `/workspaces/KARIS-KY/docs/adr/ADR-008-escrow-health-warnings.md`
+- [x] **File:** `/workspaces/KARIS-KY/docs/adr/ADR-013-escrow-health-warnings.md`
   - [x] Warning codes table: code 4004 fully documented
   - [x] Health computation logic: staleness detection algorithm explained
   - [x] Storage section: new DataKey variants documented
@@ -112,7 +112,7 @@
 
 - [x] **File:** `/workspaces/KARIS-KY/README.md`
   - [x] Entrypoint table: `check_escrow_health` added with description
-  - [x] Link to ADR-008 for warning codes reference
+  - [x] Link to ADR-013 for warning codes reference
 
 ### Deliverables
 - [x] Implementation summary document: `/workspaces/KARIS-KY/FUNDING_STALLED_IMPLEMENTATION.md`
@@ -189,7 +189,7 @@ All acceptance criteria met:
 **Files Modified:** 4
 - escrow/src/lib.rs (core implementation)
 - escrow/src/tests/health_warnings.rs (6 new tests)
-- docs/adr/ADR-008-escrow-health-warnings.md (specification)
+- docs/adr/ADR-013-escrow-health-warnings.md (specification)
 - README.md (entrypoint reference)
 
 **Lines of Code:** ~520 (implementation + tests + docs)

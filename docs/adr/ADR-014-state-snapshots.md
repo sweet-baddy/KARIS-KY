@@ -1,4 +1,4 @@
-# ADR-008: State Snapshot Recovery and Rollback
+# ADR-014: State Snapshot Recovery and Rollback
 
 **Status:** Accepted  
 **Date:** 2026-07-28  

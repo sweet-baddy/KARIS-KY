@@ -102,7 +102,7 @@ See [`TEMPLATE.md`](TEMPLATE.md) for the standard structure. Key sections:
 ## Examples
 
 ### RFC-001: Multi-Token Support
-**Status:** DRAFT (hypothetical)  
+**Status:** CLOSED (superseded by [RFC-006](RFC-006-multi-token-escrow.md))<br>
 **Scope:** Allow escrows to settle in multiple stablecoin assets (USDC, EURC, etc.)  
 **Complexity:** High (storage schema, settlement logic, token validation)
 
@@ -196,10 +196,10 @@ Reviewers should check:
 
 | RFC | Title | Status | Target Release | Notes |
 |-----|-------|--------|-----------------|-------|
-| [RFC-001](RFC-001-multi-token-support.md) | Multi-Token Support | DRAFT | v2.0 | Extends escrow to support multiple settlement tokens |
+| [RFC-001](RFC-001-multi-token-support.md) | Multi-Token Support | CLOSED (superseded by [RFC-006](RFC-006-multi-token-escrow.md)) | v2.0 | Historical high-level proposal; see RFC-006 for the current exploration |
 | [RFC-002](RFC-002-yield-reinvestment.md) | Yield Reinvestment | DISCUSSION | v1.5 | Auto-compound investor yield across funding rounds |
 | [RFC-003](RFC-003-registry-integration.md) | Registry Integration | ACCEPTED | v1.4 | Discoverability via centralized registry contract |
-| [RFC-006](RFC-006-multi-token-escrow.md) | Multi-Token Escrow Support | DRAFT | v2.0 | Evaluates token basket, per-token shards, and registry abstraction |
+| [RFC-006](RFC-006-multi-token-escrow.md) | Multi-Token Escrow Support | DRAFT (current proposal) | v2.0 | Evaluates token basket, per-token shards, and registry abstraction |
 
 ---
 

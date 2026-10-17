@@ -1,10 +1,12 @@
 # RFC-001: Multi-Token Support
 
-**Status:** DRAFT  
+**Status:** CLOSED (superseded by [RFC-006: Multi-Token Escrow Support](./RFC-006-multi-token-escrow.md))<br>
 **Author:** Platform Team (@karis-ky)  
 **Date Proposed:** 2026-07-27  
 **Target Release:** v2.0 (Q1 2027)  
 **Related:** Issue #847, [Token Integration Checklist](../ESCROW_TOKEN_INTEGRATION_CHECKLIST.md)
+
+> This proposal is retained for history. [RFC-006](./RFC-006-multi-token-escrow.md) is the current multi-token design exploration.
 
 ---
 

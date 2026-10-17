@@ -15,8 +15,8 @@
 
 ### For Detailed Design
 - Complete design: [DESIGN_HEALTH_AND_DELTAS.md](DESIGN_HEALTH_AND_DELTAS.md)
-- Health warnings ADR: [docs/adr/ADR-008-escrow-health-warnings.md](docs/adr/ADR-008-escrow-health-warnings.md)
-- Delta snapshots ADR: [docs/adr/ADR-009-delta-encoded-snapshots.md](docs/adr/ADR-009-delta-encoded-snapshots.md)
+- Health warnings ADR: [docs/adr/ADR-013-escrow-health-warnings.md](docs/adr/ADR-013-escrow-health-warnings.md)
+- Delta snapshots ADR: [docs/adr/ADR-015-delta-encoded-snapshots.md](docs/adr/ADR-015-delta-encoded-snapshots.md)
 
 ### For Code
 - Main implementation: [escrow/src/lib.rs](escrow/src/lib.rs)
@@ -182,8 +182,8 @@ Future integration (designed but not activated in this PR):
 | File | Purpose | Lines |
 |------|---------|-------|
 | DESIGN_HEALTH_AND_DELTAS.md | Comprehensive design doc | 446 |
-| ADR-008-escrow-health-warnings.md | Architecture decision record | 190 |
-| ADR-009-delta-encoded-snapshots.md | Architecture decision record | 216 |
+| ADR-013-escrow-health-warnings.md | Architecture decision record | 190 |
+| ADR-015-delta-encoded-snapshots.md | Architecture decision record | 216 |
 | IMPLEMENTATION_SUMMARY.md | Executive summary & deployment guide | 268 |
 | VERIFICATION_CHECKLIST.md | Detailed verification of all requirements | 240 |
 | PR_SUMMARY_FEATURES.md | Pull request summary | 185 |
@@ -221,8 +221,8 @@ New test files:
   Total: ~669 lines
 
 New documentation:
-  - ADR-008: ~190 lines
-  - ADR-009: ~216 lines
+  - ADR-013: ~190 lines
+  - ADR-015: ~216 lines
   - Design doc: ~446 lines
   - Other docs: ~893 lines
   Total: ~1,745 lines
@@ -263,12 +263,12 @@ Grand total: ~2,754 lines (code + tests + docs)
 ## Support & Questions
 
 ### For Health Warnings
-- See: ADR-008, DESIGN_HEALTH_AND_DELTAS.md (section 1)
+- See: ADR-013, DESIGN_HEALTH_AND_DELTAS.md (section 1)
 - Questions about warning logic? Check compute_and_emit_health_warning() docs
 - Questions about integration? Check lib.rs integration points (lines 2766, 2868, 3023)
 
 ### For Delta Snapshots
-- See: ADR-009, DESIGN_HEALTH_AND_DELTAS.md (section 2)
+- See: ADR-015, DESIGN_HEALTH_AND_DELTAS.md (section 2)
 - Questions about reconstruction? Check reconstruct_snapshot_from_deltas() docs
 - Questions about storage? Check append_snapshot_delta() docs
 - Questions about backward compat? See DESIGN_HEALTH_AND_DELTAS.md "Backward Compatibility"

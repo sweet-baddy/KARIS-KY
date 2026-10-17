@@ -1,4 +1,4 @@
-# ADR-008: Escrow Health Warning System
+# ADR-013: Escrow Health Warning System
 
 **Status:** Accepted  
 **Date:** 2026-07-28  

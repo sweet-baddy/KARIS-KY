@@ -287,7 +287,7 @@ If you encounter issues during snapshot/revert:
 
 ## References
 
-- [ADR-008: State Snapshots](adr/ADR-008-state-snapshots.md) — Architecture Decision Record
+- [ADR-014: State Snapshots](adr/ADR-014-state-snapshots.md) — Architecture Decision Record
 - [ADR-002: Auth Boundaries](adr/ADR-002-auth-boundaries.md) — Role-based authorization
 - [OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md) — Full operational procedures
 - `escrow/src/lib.rs` — Implementation source code

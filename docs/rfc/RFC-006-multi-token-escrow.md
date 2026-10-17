@@ -6,11 +6,15 @@
 **Target Release:** TBD  
 **Related:** [RFC-001: Multi-Token Support](./RFC-001-multi-token-support.md), Issue #125
 
+**Supersedes:** [RFC-001: Multi-Token Support](./RFC-001-multi-token-support.md)
+
 ---
 
 ## Summary
 
-RFC-001 explores multi-token support at a high level, but the current contract
+This RFC is the current multi-token design exploration. It supersedes RFC-001,
+which is retained as a historical high-level proposal. RFC-006 explores
+multi-token support in greater depth, but remains a draft. The current contract
 architecture binds exactly one funding token at `init()` and never changes it.
 This RFC formally evaluates the engineering path for allowing multiple funding
 tokens (e.g., USDC + EURC) within a single escrow or across a sharded escrow
