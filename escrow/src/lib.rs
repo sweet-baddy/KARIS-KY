@@ -4901,8 +4901,8 @@ impl LiquifactEscrow {
     /// |-----------|--------|
     /// | `stored_version != from_version` | [`EscrowError::MigrationVersionMismatch`] |
     /// | Migration already applied; replay detected | [`EscrowError::MigrationAlreadyApplied`] |
-    /// | `from_version >= SCHEMA_VERSION` | [`EscrowError::AlreadyCurrentSchemaVersion`] |
-    /// | Any `from_version < SCHEMA_VERSION` (all paths) | [`EscrowError::NoMigrationPath`] |
+    /// | `from_version > SCHEMA_VERSION` | [`EscrowError::AlreadyCurrentSchemaVersion`] |
+    /// | `from_version < SCHEMA_VERSION` (no legacy migration is implemented) | [`EscrowError::NoMigrationPath`] |
     ///
     /// See `docs/OPERATOR_RUNBOOK.md` §2 for step-by-step instructions on implementing
     /// a concrete migration path. **Before implementing migration logic, ensure this
@@ -4929,26 +4929,39 @@ impl LiquifactEscrow {
             fail(&env, EscrowError::MigrationAlreadyApplied)
         }
 
-        // 5. Version boundary checks
-        if from_version >= SCHEMA_VERSION {
-            fail(&env, EscrowError::AlreadyCurrentSchemaVersion)
-        } else {
-            // No migration path is implemented for any version below SCHEMA_VERSION.
-            // To add one: implement the transformation here, call
-            //   env.storage().instance().set(&DataKey::Version, &NEW_VERSION);
-            //   env.storage().instance().set(&DataKey::MigrationExecutionLog(from_version, NEW_VERSION),
-            //       &env.ledger().sequence());
-            //   env.storage().instance().set(&DataKey::MigrationCompletedAt(from_version, NEW_VERSION),
-            //       &env.ledger().timestamp());
-            // and return NEW_VERSION before reaching this typed error.
-            //
-            // When a migration path IS implemented, also record the version change:
-            //   let mut vh: Vec<(u32, u64)> = env.storage().instance()
-            //       .get(&DataKey::VersionHistory).unwrap_or_else(|| Vec::new(&env));
-            //   vh.push_back((NEW_VERSION, env.ledger().timestamp()));
-            //   env.storage().instance().set(&DataKey::VersionHistory, &vh);
+        // Older schemas need an explicit storage transformation; current-version
+        // calls are audit-only and are used after a same-schema WASM upgrade.
+        if from_version < SCHEMA_VERSION {
             fail(&env, EscrowError::NoMigrationPath)
+        } else if from_version > SCHEMA_VERSION {
+            fail(&env, EscrowError::AlreadyCurrentSchemaVersion)
         }
+
+        // Record a same-schema upgrade audit without interpreting legacy storage.
+        let completed_at = env.ledger().timestamp();
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &SCHEMA_VERSION);
+        env.storage().instance().set(
+            &DataKey::MigrationExecutionLog(from_version, SCHEMA_VERSION),
+            &(env.ledger().sequence() as u32),
+        );
+        env.storage().instance().set(
+            &DataKey::MigrationCompletedAt(from_version, SCHEMA_VERSION),
+            &completed_at,
+        );
+
+        let mut version_history: Vec<(u32, u64)> = env
+            .storage()
+            .instance()
+            .get(&DataKey::VersionHistory)
+            .unwrap_or_else(|| Vec::new(&env));
+        version_history.push_back((SCHEMA_VERSION, completed_at));
+        env.storage()
+            .instance()
+            .set(&DataKey::VersionHistory, &version_history);
+
+        SCHEMA_VERSION
     }
 
     /// Query the attestation append log with optional filters and pagination.

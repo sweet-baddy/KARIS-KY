@@ -488,12 +488,13 @@ fn test_propose_admin_emits_event() {
 }
 
 #[test]
-#[should_panic]
-fn test_migrate_at_current_version_panics() {
+fn test_migrate_at_current_version_records_upgrade_audit() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.migrate(&SCHEMA_VERSION);
+
+    assert_eq!(client.migrate(&SCHEMA_VERSION), SCHEMA_VERSION);
+    assert_eq!(client.get_version_history().len(), 2);
 }
 
 #[test]

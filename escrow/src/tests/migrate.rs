@@ -46,7 +46,7 @@ fn test_migration_error_90_version_mismatch() {
 
 /// Test: Error 91 — AlreadyCurrentSchemaVersion
 ///
-/// When `from_version >= SCHEMA_VERSION`, the contract should panic
+/// When `from_version > SCHEMA_VERSION`, the contract should panic
 /// with error code 91 (AlreadyCurrentSchemaVersion).
 #[test]
 #[should_panic(expected = "91")]
@@ -81,9 +81,12 @@ fn test_migration_error_91_already_current() {
     // Get the current SCHEMA_VERSION
     let current_version = client.get_version();
 
-    // Try to migrate with from_version >= current version
-    // This should panic with error 91
-    client.migrate(&current_version);
+    // Future versions are rejected after matching the stored version.
+    let future_version = current_version + 1;
+    env.storage()
+        .instance()
+        .set(&DataKey::Version, &future_version);
+    client.migrate(&future_version);
 }
 
 /// Test: Error 92 — NoMigrationPath
@@ -120,9 +123,12 @@ fn test_migration_error_92_no_migration_path() {
         &None,
     );
 
-    // The stored version is SCHEMA_VERSION (e.g., 6)
-    // Provide a from_version that is less than SCHEMA_VERSION
-    // Since no migration path is implemented, this should panic with error 92
+    // Simulate a stored legacy version with no supported migration path.
+    env.storage()
+        .instance()
+        .set(&DataKey::Version, &1u32);
+
+    // Version 1 is older than the immediately preceding schema, so this path is unsupported.
     client.migrate(&1u32);
 }
 

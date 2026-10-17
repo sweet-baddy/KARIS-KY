@@ -241,6 +241,45 @@ jobs:
             --summary-only \
             -p karis_ky_escrow
 
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - escrow_funding_operations
+          - escrow_settlement_flow
+          - escrow_yield_calculations
+          - escrow_migrate
+          - escrow_init_validation
+          - escrow_holds
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: escrow/fuzz -> target
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run ${{ matrix.target }} for 60 seconds
+        working-directory: escrow/fuzz
+        run: cargo fuzz run "${{ matrix.target }}" -- -max_total_time=60
+
+      - name: Upload fuzz crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ matrix.target }}
+          path: escrow/fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore
+          retention-days: 14
+
   npm-audit:
     runs-on: ubuntu-latest
     strategy:
