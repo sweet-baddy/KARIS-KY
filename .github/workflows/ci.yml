@@ -203,7 +203,7 @@ jobs:
 
       - name: Upload WASM size report artifact
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wasm-size-report
           path: /tmp/wasm_size_report.md
@@ -211,7 +211,7 @@ jobs:
 
       - name: Upload WASM artifact
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: karis-ky-escrow-wasm
           path: target/wasm32-unknown-unknown/release/karis_ky_escrow.wasm
@@ -254,7 +254,7 @@ jobs:
 
       - name: Upload contract spec artifact
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: karis-ky-escrow-spec
           path: sdk-ts/spec.json
