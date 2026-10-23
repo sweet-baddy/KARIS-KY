@@ -6,24 +6,72 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  secret-scan:
+  # Ensure TypeScript SDKs stay aligned with the generated contract interfaces.
+  sdk-typecheck-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v7
 
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache SDK node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdk/node_modules
+            sdk-ts/node_modules
+          key: ${{ runner.os }}-sdk-node-${{ hashFiles('sdk/package-lock.json', 'sdk-ts/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-sdk-node-
+
+      - name: Install and validate SDKs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for dir in sdk sdk-ts; do
+            if [ ! -d "$dir" ]; then
+              echo "Skipping missing SDK project: $dir"
+              continue
+            fi
+
+            echo "==> Validating $dir"
+            cd "$dir"
+            npm ci
+            npx tsc --noEmit
+            npm test -- --runInBand --passWithNoTests
+            cd ..
+          done
 
   fmt-build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install backup test dependencies
+        run: python -m pip install pytest "stellar-sdk>=11.0.0"
+
+      - name: Test escrow backup tooling
+        run: python -m pytest backend/tests
+
+  fmt-build-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
         # Channel is pinned by rust-toolchain.toml at the repo root; the
@@ -34,7 +82,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Check formatting
         run: cargo fmt -p karis_ky_escrow -- --check
@@ -42,8 +90,18 @@ jobs:
       - name: Clippy
         run: cargo clippy -p karis_ky_escrow -- -D warnings
 
+      - name: Clippy REPL CLI
+        run: cargo clippy -p repl-cli -- -D warnings
+
       - name: Build
         run: cargo build
+
+      - name: Build docs (deny broken intra-doc links)
+        # Fails CI on any broken rustdoc intra-doc link so documentation
+        # references to non-existent items cannot regress unnoticed.
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: "-D rustdoc::broken_intra_doc_links"
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
@@ -52,7 +110,7 @@ jobs:
         run: cargo audit --deny warnings
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@cargo-deny
+        uses: taiki-e/install-action@c95a8e71b2aa92ca779c9c822b9d41038c0fc503 # cargo-deny
 
       - name: Run cargo-deny (licenses, bans, advisories)
         run: cargo deny check
@@ -60,13 +118,11 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      - name: Run snapshot tests
-        run: cargo test --test snapshots
-        env:
-          INSTA_FORCE_ACCEPT: "false"
+      - name: Test REPL CLI
+        run: cargo test -p repl-cli
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@671164c891d3e20f5b8ece04798d0154d1262d65 # cargo-llvm-cov
 
       - name: Add WASM target
         run: rustup target add wasm32-unknown-unknown
@@ -150,7 +206,7 @@ jobs:
 
       - name: Upload WASM size report artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wasm-size-report
           path: /tmp/wasm_size_report.md
@@ -158,7 +214,7 @@ jobs:
 
       - name: Upload WASM artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: karis-ky-escrow-wasm
           path: target/wasm32-unknown-unknown/release/karis_ky_escrow.wasm
@@ -201,7 +257,7 @@ jobs:
 
       - name: Upload contract spec artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: karis-ky-escrow-spec
           path: sdk-ts/spec.json

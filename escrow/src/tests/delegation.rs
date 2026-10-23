@@ -199,6 +199,32 @@ fn test_claim_payout_as_delegate_revoked_fails() {
 }
 
 #[test]
+fn test_redelegation_allows_new_delegate_and_rejects_former_delegate() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let investor = Address::generate(&env);
+    let former_delegate = Address::generate(&env);
+    let new_delegate = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.set_yield_claim_delegate(&investor, &former_delegate);
+    client.fund(&investor, &TARGET);
+    client.settle();
+    client.revoke_yield_claim_delegate(&investor);
+
+    let revoked_claim = client.try_claim_payout_as_delegate(&investor, &former_delegate);
+    assert_contract_error(revoked_claim, EscrowError::DelegationRevoked);
+
+    client.set_yield_claim_delegate(&investor, &new_delegate);
+    let former_claim = client.try_claim_payout_as_delegate(&investor, &former_delegate);
+    assert_contract_error(former_claim, EscrowError::NoDelegationSet);
+
+    client.claim_payout_as_delegate(&investor, &new_delegate);
+}
+
+#[test]
 fn test_claim_payout_as_delegate_wrong_delegate_fails() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);

@@ -18,8 +18,8 @@
 
 #[cfg(test)]
 use super::{
-    default_init, deploy, deploy_with_id, free_addresses, install_stellar_asset_token, setup,
-    MAX_DUST_SWEEP_AMOUNT, TARGET,
+    assert_contract_error, default_init, deploy, deploy_with_id, free_addresses,
+    install_stellar_asset_token, setup, MAX_DUST_SWEEP_AMOUNT, TARGET,
 };
 use crate::LiquifactEscrow;
 use soroban_sdk::{
@@ -2451,14 +2451,11 @@ fn reinvest_yield_requires_settled_source_escrow() {
     );
 
     let result = source_client.try_reinvest_yield(&investor, &target_client.address, &1_000i128);
-    assert!(
-        result.is_err(),
-        "source escrow must be settled before reinvesting"
-    );
+    assert_contract_error(result, crate::EscrowError::ReinvestSourceEscrowNotSettled);
 }
 
 #[test]
-fn reinvest_yield_allows_rollover_into_funding_target() {
+fn reinvest_yield_rejects_insufficient_accrued_yield() {
     let env = Env::default();
     env.mock_all_auths();
     let (source_client, admin, sme) = setup(&env);
@@ -2473,7 +2470,7 @@ fn reinvest_yield_allows_rollover_into_funding_target() {
     let target_sme = Address::generate(&env);
     target_client.init(
         &target_admin,
-        &String::from_str(&env, "TARGET_REINVEST"),
+        &String::from_str(&env, "TARGET_INSUFFICIENT_YIELD"),
         &target_sme,
         &TARGET,
         &800i64,
@@ -2491,12 +2488,83 @@ fn reinvest_yield_allows_rollover_into_funding_target() {
         &None,
     );
 
-    source_client.reinvest_yield(&investor, &target_client.address, &1_000i128);
+    let result = source_client.try_reinvest_yield(
+        &investor,
+        &target_client.address,
+        &8_000_000_001i128,
+    );
+    assert_contract_error(result, crate::EscrowError::ReinvestYieldInsufficient);
+}
+
+#[test]
+fn reinvest_yield_allows_rollover_into_funding_target() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let (source_id, source_client) = deploy_with_id(&env);
+    let source_admin = Address::generate(&env);
+    let source_sme = Address::generate(&env);
+    let source_treasury = Address::generate(&env);
+    source_client.init(
+        &source_admin,
+        &String::from_str(&env, "SOURCE_REINVEST"),
+        &source_sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &source_treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = Address::generate(&env);
+    source_client.fund(&investor, &TARGET);
+    source_client.settle();
+    let reinvest_amount = 1_000i128;
+    token.stellar.mint(&source_id, &(TARGET + reinvest_amount));
+
+    let (target_id, target_client) = deploy_with_id(&env);
+    let target_admin = Address::generate(&env);
+    let target_sme = Address::generate(&env);
+    let target_treasury = Address::generate(&env);
+    target_client.init(
+        &target_admin,
+        &String::from_str(&env, "TARGET_REINVEST"),
+        &target_sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &target_treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    source_client.reinvest_yield(&investor, &target_id, &reinvest_amount);
     let target = target_client.get_escrow();
     assert_eq!(
         target.status, 0u32,
         "target escrow must remain in funding state"
     );
+    assert_eq!(target.funded_amount, reinvest_amount);
+    assert_eq!(target_client.get_contribution(&investor), reinvest_amount);
+    assert_eq!(token.token.balance(&target_id), reinvest_amount);
+    assert_eq!(token.token.balance(&source_id), TARGET);
 }
 
 #[test]
@@ -2535,4 +2603,20 @@ fn reinvest_yield_rejects_non_positive_amount() {
     );
 
     source_client.reinvest_yield(&investor, &target_client.address, &0i128);
+}
+
+#[test]
+fn reinvest_yield_rejects_self_target() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (source_client, admin, sme) = setup(&env);
+    default_init(&source_client, &env, &admin, &sme);
+
+    let investor = Address::generate(&env);
+    source_client.fund(&investor, &TARGET);
+    source_client.settle();
+
+    // Attempt to reinvest yield back into the same (source) escrow
+    let result = source_client.try_reinvest_yield(&investor, &source_client.address, &1_000i128);
+    assert_contract_error(result, crate::EscrowError::ReinvestSelfTargetRejected);
 }

@@ -14,7 +14,9 @@ from pathlib import Path
 from validate_schema_version_matrix import (
     extract_schema_version,
     extract_latest_version_from_matrix,
+    extract_expected_schema_version_from_env,
     validate_schema_version,
+    validate_env_schema_versions,
 )
 
 
@@ -177,6 +179,139 @@ def test_validate_schema_version_multiple_entries():
         print("✓ test_validate_schema_version_multiple_entries passed")
 
 
+def test_extract_expected_schema_version_from_env_valid():
+    """Test extracting EXPECTED_SCHEMA_VERSION from .env file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env_file = Path(tmpdir) / ".env.testnet"
+        env_file.write_text(
+            """
+# Test env file
+STELLAR_NETWORK=testnet
+EXPECTED_SCHEMA_VERSION=8
+SOROBAN_RPC_URL=https://example.com
+        """
+        )
+        version = extract_expected_schema_version_from_env(env_file)
+        assert version == 8, f"Expected 8, got {version}"
+        print("✓ test_extract_expected_schema_version_from_env_valid passed")
+
+
+def test_extract_expected_schema_version_from_env_with_comment():
+    """Test extracting version with trailing comment."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env_file = Path(tmpdir) / ".env"
+        env_file.write_text("EXPECTED_SCHEMA_VERSION=7 # Schema version comment")
+        version = extract_expected_schema_version_from_env(env_file)
+        assert version == 7, f"Expected 7, got {version}"
+        print("✓ test_extract_expected_schema_version_from_env_with_comment passed")
+
+
+def test_extract_expected_schema_version_from_env_not_present():
+    """Test that missing EXPECTED_SCHEMA_VERSION returns None."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env_file = Path(tmpdir) / ".env"
+        env_file.write_text("STELLAR_NETWORK=testnet\nSOROBAN_RPC_URL=https://example.com")
+        version = extract_expected_schema_version_from_env(env_file)
+        assert version is None, f"Expected None for missing field, got {version}"
+        print("✓ test_extract_expected_schema_version_from_env_not_present passed")
+
+
+def test_extract_expected_schema_version_from_env_not_found():
+    """Test error when .env file doesn't exist."""
+    try:
+        extract_expected_schema_version_from_env(Path("/nonexistent/.env"))
+        assert False, "Should have raised FileNotFoundError"
+    except FileNotFoundError:
+        print("✓ test_extract_expected_schema_version_from_env_not_found passed")
+
+
+def test_validate_env_schema_versions_match():
+    """Test successful validation when .env EXPECTED_SCHEMA_VERSION matches code."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        lib_rs = tmpdir_path / "lib.rs"
+        env_file = tmpdir_path / ".env.testnet"
+
+        lib_rs.write_text("pub const SCHEMA_VERSION: u32 = 8;")
+        env_file.write_text("EXPECTED_SCHEMA_VERSION=8\nSTELLAR_NETWORK=testnet")
+
+        is_valid, message = validate_env_schema_versions(lib_rs, tmpdir_path)
+        assert is_valid, f"Validation should succeed: {message}"
+        assert "✓" in message or "ℹ" in message
+        print("✓ test_validate_env_schema_versions_match passed")
+
+
+def test_validate_env_schema_versions_mismatch():
+    """Test validation failure when .env EXPECTED_SCHEMA_VERSION doesn't match."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        lib_rs = tmpdir_path / "lib.rs"
+        env_file = tmpdir_path / ".env.testnet"
+
+        lib_rs.write_text("pub const SCHEMA_VERSION: u32 = 8;")
+        env_file.write_text("EXPECTED_SCHEMA_VERSION=7\nSTELLAR_NETWORK=testnet")
+
+        is_valid, message = validate_env_schema_versions(lib_rs, tmpdir_path)
+        assert not is_valid, f"Validation should fail: {message}"
+        assert "✗" in message
+        assert "mismatch" in message.lower()
+        assert "8" in message
+        assert "7" in message
+        print("✓ test_validate_env_schema_versions_mismatch passed (KEY .ENV TEST)")
+
+
+def test_validate_env_schema_versions_multiple_files():
+    """Test validation with multiple .env files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        lib_rs = tmpdir_path / "lib.rs"
+        env1 = tmpdir_path / ".env"
+        env2 = tmpdir_path / ".env.testnet"
+        env3 = tmpdir_path / ".env.prod"
+
+        lib_rs.write_text("pub const SCHEMA_VERSION: u32 = 8;")
+        env1.write_text("EXPECTED_SCHEMA_VERSION=8")
+        env2.write_text("EXPECTED_SCHEMA_VERSION=8\nSTELLAR_NETWORK=testnet")
+        env3.write_text("EXPECTED_SCHEMA_VERSION=8\nSTELLAR_NETWORK=public")
+
+        is_valid, message = validate_env_schema_versions(lib_rs, tmpdir_path)
+        assert is_valid, f"All files should match: {message}"
+        assert "3" in message  # Should report 3 files checked
+        print("✓ test_validate_env_schema_versions_multiple_files passed")
+
+
+def test_validate_env_schema_versions_mixed_present_absent():
+    """Test validation when only some .env files have EXPECTED_SCHEMA_VERSION."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        lib_rs = tmpdir_path / "lib.rs"
+        env1 = tmpdir_path / ".env.testnet"
+        env2 = tmpdir_path / ".env.local"
+
+        lib_rs.write_text("pub const SCHEMA_VERSION: u32 = 8;")
+        env1.write_text("EXPECTED_SCHEMA_VERSION=8")
+        env2.write_text("# Local config - no schema version")
+
+        is_valid, message = validate_env_schema_versions(lib_rs, tmpdir_path)
+        assert is_valid, f"Should pass when one has matching version: {message}"
+        assert "1" in message  # Should report 1 file checked
+        print("✓ test_validate_env_schema_versions_mixed_present_absent passed")
+
+
+def test_validate_env_schema_versions_no_files():
+    """Test validation when no .env files exist."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        lib_rs = tmpdir_path / "lib.rs"
+
+        lib_rs.write_text("pub const SCHEMA_VERSION: u32 = 8;")
+
+        is_valid, message = validate_env_schema_versions(lib_rs, tmpdir_path)
+        assert is_valid, f"Should pass when no .env files: {message}"
+        assert "No .env* files" in message or "optional" in message.lower()
+        print("✓ test_validate_env_schema_versions_no_files passed")
+
+
 def run_all_tests():
     """Run all tests and report results."""
     tests = [
@@ -190,6 +325,16 @@ def run_all_tests():
         test_validate_schema_version_match,
         test_validate_schema_version_mismatch,
         test_validate_schema_version_multiple_entries,
+        # New .env validation tests
+        test_extract_expected_schema_version_from_env_valid,
+        test_extract_expected_schema_version_from_env_with_comment,
+        test_extract_expected_schema_version_from_env_not_present,
+        test_extract_expected_schema_version_from_env_not_found,
+        test_validate_env_schema_versions_match,
+        test_validate_env_schema_versions_mismatch,
+        test_validate_env_schema_versions_multiple_files,
+        test_validate_env_schema_versions_mixed_present_absent,
+        test_validate_env_schema_versions_no_files,
     ]
 
     passed = 0

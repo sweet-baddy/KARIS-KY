@@ -212,3 +212,66 @@ fn snapshot_test_version() {
     let version = client.get_version();
     insta::assert_json_snapshot!(version, @"6");
 }
+
+#[test]
+fn snapshot_test_export_escrow_snapshot() {
+    let env = Env::new();
+    setup_ledger(&env);
+    let (client, _contract_id) = deploy_contract(&env);
+    let (admin, sme, investor, treasury) = generate_addresses(&env);
+    let (token_id, _token_client, _sac) = install_stellar_asset_token(&env);
+
+    client.init(
+        &admin,
+        &SorobanString::from_str(&env, "INV-EXPORT-001"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &50_000i128);
+
+    insta::assert_json_snapshot!(client.export_escrow_snapshot(), {
+        ".escrow.admin" => "[admin]",
+        ".escrow.sme_address" => "[sme]",
+        ".funding_token" => "[funding token]",
+        ".treasury" => "[treasury]"
+    }, @r###"
+    {
+      "escrow": {
+        "invoice_id": "INV-EXPORT-001",
+        "admin": "[admin]",
+        "sme_address": "[sme]",
+        "amount": 100000,
+        "funding_target": 100000,
+        "funded_amount": 50000,
+        "yield_bps": 800,
+        "maturity": 0,
+        "status": 0,
+        "guardian": null
+      },
+      "schema_version": 6,
+      "legal_hold": false,
+      "funding_close_snapshot": "None",
+      "unique_funder_count": 1,
+      "is_allowlist_active": false,
+      "sme_collateral_commitment": "None",
+      "primary_attestation_hash": null,
+      "attestation_log_length": 0,
+      "sanctions_provider": null,
+      "funding_token": "[funding token]",
+      "treasury": "[treasury]",
+      "registry": null,
+      "version_history": [[6, 12345]]
+    }
+    "###);
+}

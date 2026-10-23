@@ -214,7 +214,7 @@ pub fn check_escrow_health(env: Env) -> (u32, i64, i64) {
 
 ## References
 
-- [ADR-001: State Model](docs/adr/ADR-001-state-model.md)
-- [ADR-002: Auth Boundaries](docs/adr/ADR-002-auth-boundaries.md)
-- [Escrow Error Messages](docs/escrow-error-messages.md)
+- [ADR-001: State Model](ADR-001-state-model.md)
+- [ADR-002: Auth Boundaries](ADR-002-auth-boundaries.md)
+- [Escrow Error Messages](../escrow-error-messages.md)
 - [Issue #231](https://github.com/karis-ky/escrow-contracts/issues/231)

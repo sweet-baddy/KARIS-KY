@@ -214,4 +214,4 @@ For context on design decisions and operational procedures:
 
 ## License
 
-MIT (see [LICENSE](../../LICENSE) in root)
+MIT (see the [escrow package metadata](../../escrow/Cargo.toml))

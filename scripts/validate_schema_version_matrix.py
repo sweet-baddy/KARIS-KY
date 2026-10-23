@@ -93,6 +93,124 @@ def extract_latest_version_from_matrix(matrix_path: Path) -> int:
     return int(match.group(1))
 
 
+def extract_expected_schema_version_from_env(env_path: Path) -> int | None:
+    """
+    Extract EXPECTED_SCHEMA_VERSION from a .env file.
+
+    Expected format:
+        EXPECTED_SCHEMA_VERSION=8
+
+    Args:
+        env_path: Path to a .env file
+
+    Returns:
+        The version number if found, None if not present (optional in some .env files)
+
+    Raises:
+        FileNotFoundError: If env file is not found
+        ValueError: If EXPECTED_SCHEMA_VERSION is present but not parseable
+    """
+    if not env_path.exists():
+        raise FileNotFoundError(f"File not found: {env_path}")
+
+    content = env_path.read_text(encoding="utf-8")
+
+    # Match: EXPECTED_SCHEMA_VERSION=N (allowing for optional comments)
+    pattern = r"^\s*EXPECTED_SCHEMA_VERSION\s*=\s*(\d+)\s*(?:#.*)?$"
+    match = re.search(pattern, content, re.MULTILINE)
+
+    if not match:
+        # Field is optional in some .env files (not all have it)
+        return None
+
+    return int(match.group(1))
+
+
+def validate_env_schema_versions(
+    lib_rs_path: Path, env_file_dir: Path = None
+) -> tuple[bool, str]:
+    """
+    Validate that all .env* files have EXPECTED_SCHEMA_VERSION matching SCHEMA_VERSION.
+
+    Scans the repository root (or specified directory) for .env* files and checks
+    that any EXPECTED_SCHEMA_VERSION values match the SCHEMA_VERSION from lib.rs.
+    Missing EXPECTED_SCHEMA_VERSION fields are allowed (not all .env files have them).
+
+    Args:
+        lib_rs_path: Path to escrow/src/lib.rs
+        env_file_dir: Directory to scan for .env files (default: current directory)
+
+    Returns:
+        A tuple (is_valid, message) where is_valid is True if all found versions match
+    """
+    if env_file_dir is None:
+        env_file_dir = Path(".")
+
+    try:
+        code_version = extract_schema_version(lib_rs_path)
+    except (FileNotFoundError, ValueError) as e:
+        return False, f"✗ Failed to extract SCHEMA_VERSION: {e}"
+
+    # Find all .env* files in the directory (non-recursive, top level only)
+    env_files = sorted(env_file_dir.glob(".env*"))
+
+    if not env_files:
+        return (
+            True,
+            f"ℹ No .env* files found in {env_file_dir} (this is OK if using external config)",
+        )
+
+    mismatches = []
+    checked_count = 0
+
+    for env_file in env_files:
+        try:
+            expected_version = extract_expected_schema_version_from_env(env_file)
+            if expected_version is None:
+                # Field is optional; skip files that don't have it
+                continue
+
+            checked_count += 1
+            if expected_version != code_version:
+                mismatches.append(
+                    {
+                        "file": env_file.name,
+                        "expected": expected_version,
+                        "actual": code_version,
+                    }
+                )
+        except (FileNotFoundError, ValueError) as e:
+            return (
+                False,
+                f"✗ Error reading {env_file.name}: {e}",
+            )
+
+    if mismatches:
+        msg = "✗ Schema version mismatch in .env files:\n"
+        for m in mismatches:
+            msg += (
+                f"  {m['file']}: EXPECTED_SCHEMA_VERSION={m['expected']} "
+                f"but SCHEMA_VERSION in lib.rs={m['actual']}\n"
+            )
+        msg += (
+            f"\nAction: Update EXPECTED_SCHEMA_VERSION in .env* files to match "
+            f"SCHEMA_VERSION={code_version} in escrow/src/lib.rs"
+        )
+        return False, msg
+
+    if checked_count == 0:
+        return (
+            True,
+            f"ℹ No EXPECTED_SCHEMA_VERSION fields found in .env* files (optional check)",
+        )
+
+    return (
+        True,
+        f"✓ Schema version .env validation passed: {checked_count} file(s) have "
+        f"EXPECTED_SCHEMA_VERSION={code_version} matching lib.rs",
+    )
+
+
 def validate_schema_version(
     lib_rs_path: Path, matrix_path: Path
 ) -> tuple[bool, str]:
@@ -139,6 +257,10 @@ def main() -> int:
 
     Runs from the repository root; paths are relative to that.
 
+    Performs two checks:
+    1. SCHEMA_VERSION in escrow/src/lib.rs matches the matrix (version interoperability)
+    2. EXPECTED_SCHEMA_VERSION in .env* files match the code version (deployment config)
+
     Returns:
         Exit code (0 for success, 1 for validation failure, 2 for file/parse error)
     """
@@ -146,11 +268,16 @@ def main() -> int:
     lib_rs_path = Path("escrow/src/lib.rs")
     matrix_path = Path("docs/VERSION_INTEROPERABILITY_MATRIX.md")
 
-    is_valid, message = validate_schema_version(lib_rs_path, matrix_path)
+    # Check 1: Validate against compatibility matrix
+    is_valid_matrix, matrix_message = validate_schema_version(lib_rs_path, matrix_path)
+    print(matrix_message)
 
-    print(message)
+    # Check 2: Validate .env* files
+    is_valid_env, env_message = validate_env_schema_versions(lib_rs_path, Path("."))
+    print(env_message)
 
-    if is_valid:
+    # Both checks must pass
+    if is_valid_matrix and is_valid_env:
         return 0
     else:
         # Exit code 1 = validation failure (schema version mismatch)

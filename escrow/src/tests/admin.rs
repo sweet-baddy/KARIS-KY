@@ -1,5 +1,5 @@
 use super::*;
-use crate::{AdminProposedEvent, EscrowCloseSnapshot, FundingTargetUpdated};
+use crate::{AdminProposedEvent, ContractUpgraded, EscrowCloseSnapshot, FundingTargetUpdated};
 use soroban_sdk::Event;
 
 // Admin/governance operations: target changes, maturity changes, admin handover,
@@ -293,6 +293,12 @@ fn test_verify_asset_custody_reports_signed_discrepancy() {
 
     let discrepancy = client.verify_asset_custody();
     assert_eq!(discrepancy, 200i128);
+
+    let recipient = Address::generate(&env);
+    token.token.transfer(&client.address, &recipient, &300i128);
+
+    let discrepancy = client.verify_asset_custody();
+    assert_eq!(discrepancy, -100i128);
 }
 
 #[test]
@@ -488,12 +494,13 @@ fn test_propose_admin_emits_event() {
 }
 
 #[test]
-#[should_panic]
-fn test_migrate_at_current_version_panics() {
+fn test_migrate_at_current_version_records_upgrade_audit() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.migrate(&SCHEMA_VERSION);
+
+    assert_eq!(client.migrate(&SCHEMA_VERSION), SCHEMA_VERSION);
+    assert_eq!(client.get_version_history().len(), 2);
 }
 
 #[test]
@@ -1896,7 +1903,10 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
     // Mint funded_amount into the escrow contract so withdraw() can transfer it.
     token.stellar.mint(&escrow_id, &TARGET);
     client.rotate_beneficiary(&new_sme);
-    client.withdraw();
+    let old_sme_result = client.try_withdraw(&sme);
+    assert_contract_error(old_sme_result, EscrowError::UnauthorizedWithdrawer);
+    client.withdraw(&new_sme);
+    assert_eq!(token.stellar.balance(&sme), 0);
     assert_eq!(token.stellar.balance(&new_sme), TARGET);
 }
 
@@ -3413,4 +3423,37 @@ fn test_sweep_terminal_dust_not_blocked_by_dispute_pause() {
     );
     assert!(result.is_err(), "sweep should fail when legal hold active");
     assert_panic_contains_error_code(result, 30); // LegalHoldBlocksTreasuryDustSweep
+}
+
+
+#[test]
+fn test_upgrade_emits_event_with_schema_version_and_admin() {
+    use soroban_sdk::testutils::Events as _;
+    use crate::ContractUpgraded;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    default_init(&client, &env, &admin, &sme);
+
+    // Upload WASM and get the hash
+    let wasm_hash = env.deployer().upload_contract_wasm(LiquifactEscrow::WASM);
+
+    // Call upgrade
+    client.upgrade(&wasm_hash);
+
+    // Verify the event was emitted with all three fields
+    let events = env.events().all();
+    let last_event = events.events().last().unwrap().clone();
+
+    let expected_event = ContractUpgraded {
+        name: symbol_short!("upgrade"),
+        invoice_id: client.get_escrow().invoice_id,
+        new_wasm_hash: wasm_hash.clone(),
+        schema_version: SCHEMA_VERSION,
+        admin: admin.clone(),
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert_eq!(last_event, expected_event, "upgrade event should contain new_wasm_hash, schema_version, and admin");
 }

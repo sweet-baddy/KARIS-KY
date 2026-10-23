@@ -82,6 +82,34 @@ Emitted when an investor deposits principal.
 }
 ```
 
+### `BatchFunded`
+Emitted once per `fund_batch` call after all per-investor deposits in the batch have
+been applied. Indexers should treat this as the batch-level summary and continue to
+rely on the per-investor `EscrowFunded` events for individual positions.
+
+**Topics:**
+1. `batch_fd` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `investor_count` (u32) — number of investors funded in the batch
+- `total_amount` (i128) — sum of principal deposited across the batch
+- `funded_amount` (i128) — escrow `funded_amount` after the batch was applied
+- `status` (u32) — escrow status after the batch was applied
+
+**Example (JSON Decoded):**
+```json
+{
+  "topics": ["batch_fd", "INV_001"],
+  "data": {
+    "investor_count": 3,
+    "total_amount": "3000000000",
+    "funded_amount": "8000000000",
+    "status": 0
+  }
+}
+```
+
 ### `EscrowSettled`
 Emitted when the SME finalizes the escrow after maturity.
 
@@ -174,6 +202,56 @@ Emitted when an admin toggles the compliance hold.
 **Data Payload:**
 - `active` (u32): `1` for enabled, `0` for cleared.
 
+### `CollateralDeposited`
+Emitted when collateral is posted against an escrow via `deposit_collateral`.
+
+**Topics:**
+1. `coll_dep` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `depositor` (`Address`) — account that supplied the collateral
+- `amount` (i128) — collateral amount deposited in this call
+- `total_collateral` (i128) — escrow collateral balance after the deposit
+
+### `CollateralReleased`
+Emitted when previously posted collateral is released back to the depositor via
+`release_collateral`.
+
+**Topics:**
+1. `coll_rel` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `recipient` (`Address`) — account receiving the released collateral
+- `amount` (i128) — collateral amount released in this call
+- `total_collateral` (i128) — escrow collateral balance after the release
+
+### `CollateralSwept`
+Emitted when residual collateral is swept to the treasury via `sweep_collateral`.
+
+**Topics:**
+1. `coll_swp` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `treasury` (`Address`) — treasury account receiving the swept collateral
+- `amount` (i128) — collateral amount swept in this call
+- `total_collateral` (i128) — escrow collateral balance after the sweep
+
+### `Swept`
+Emitted when the escrow's residual funding-token balance is swept to the treasury via
+`sweep`. This is distinct from `CollateralSwept`, which only moves collateral.
+
+**Topics:**
+1. `swept` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `treasury` (`Address`) — treasury account receiving the swept funds
+- `amount` (i128) — funding-token amount swept in this call
+- `remaining_balance` (i128) — escrow funding-token balance after the sweep
+
 ### `DisputePausedEvt`
 Emitted when an admin activates a dispute pause. The `action` field is `1` for
 this event; resumes use the separate `DisputeResumedEvt` event.
@@ -263,6 +341,25 @@ new `propose_upgrade`.
   }
 }
 ```
+
+---
+
+## 🗑️ Deprecated Events
+
+The following events are retained for backwards compatibility with existing indexers
+but are no longer emitted by the current contract. New integrations should not rely
+on them.
+
+### `PrimaryAttestationBound` *(deprecated)*
+Superseded by `AttestationBoundEvt`. The current contract emits `AttestationBoundEvt`
+for all new bindings; `PrimaryAttestationBound` is only referenced for legacy
+consumers and should be treated as deprecated.
+
+**Topics:**
+1. `att_bnd` (Symbol)
+
+**Data Payload:**
+- `hash` (`BytesN<32>`)
 
 ---
 

@@ -13,8 +13,7 @@ This matrix documents which schema versions are compatible with each other and d
 | 5 | Deprecated | Tiered yields, registry ref | Additive* | Possible struct layout change |
 | 6 | Deprecated | Persistent storage for investors | **Redeploy** | Yes — storage location changed |
 | 7 | Deprecated | Dispute pause state | Additive | None |
-| 8 | Deprecated | Additional features | Additive | None |
-| 9 | **Current** | Latest improvements | — | — |
+| 8 | **Current** | Guardian for legal-hold two-step confirmation | — | — |
 
 *v5: Redeploy may be required if `InvoiceEscrow` struct layout changed
 
@@ -59,14 +58,8 @@ This matrix documents which schema versions are compatible with each other and d
 
 ### Schema v7 → v8
 - **Type:** Additive upgrade
-- **Changes:** Additional features and improvements
+- **Changes:** Optional `InvoiceEscrow::guardian` field for two-step legal-hold activation
 - **Compatibility:** ✓ v8 can read v7 escrows
-- **Migration:** No `migrate()` call required
-
-### Schema v8 → v9
-- **Type:** Additive upgrade
-- **Changes:** Latest improvements
-- **Compatibility:** ✓ v9 can read v8 escrows
 - **Migration:** No `migrate()` call required
 
 ## Cross-Version Interaction

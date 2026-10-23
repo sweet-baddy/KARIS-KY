@@ -19,9 +19,11 @@ import {
   type EscrowSummary,
   type InvestorCapStatus,
   type InvestorPosition,
+  type InvestorFundingRecord,
   type EscrowSnapshot,
   type ErrorDiagnostic,
   type EscrowTemplate,
+  type InvestorCapStatus,
   type InitParams,
   type SorobanResult,
   type EscrowEvent,
@@ -316,6 +318,14 @@ export class EscrowClient {
     return this.simulate("get_contribution", [investor]);
   }
 
+  async computeInvestorPayout(investor: string): Promise<string> {
+    return this.simulate("compute_investor_payout", [investor]);
+  }
+
+  async getDistributedPrincipal(): Promise<string> {
+    return this.simulate("get_distributed_principal", []);
+  }
+
   async getUniqueFunderCount(): Promise<number> {
     return this.simulate("get_unique_funder_count", []);
   }
@@ -338,6 +348,18 @@ export class EscrowClient {
 
   async isInvestorRefunded(investor: string): Promise<boolean> {
     return this.simulate("is_investor_refunded", [investor]);
+  }
+
+  async getInvestorHistory(investor: string): Promise<InvestorFundingRecord[]> {
+    return this.simulate("get_investor_history", [investor]);
+  }
+
+  async getInvestorHistoryPage(
+    investor: string,
+    offset: number,
+    limit: number,
+  ): Promise<InvestorFundingRecord[]> {
+    return this.simulate("get_investor_history_page", [investor, offset, limit]);
   }
 
   async getMinContributionFloor(): Promise<string> {
@@ -568,6 +590,14 @@ export class EscrowClient {
     return this.invoke("claim_investor_payout", [investor], source);
   }
 
+  /** Record payout claims for multiple investors. Auth: per-investor. */
+  async batchClaimInvestorPayouts(investors: string[], source?: string): Promise<number> {
+    if (investors.length === 0) {
+      throw new Error("investors must not be empty");
+    }
+    return this.invoke("batch_claim_investor_payouts", [investors], source);
+  }
+
   /** Cancel funding. Auth: admin. */
   async cancelFunding(source?: string): Promise<InvoiceEscrow> {
     return this.invoke("cancel_funding", [], source);
@@ -584,8 +614,11 @@ export class EscrowClient {
   }
 
   /** Set or clear legal hold. Auth: admin. */
-  async setLegalHold(active: boolean, source?: string): Promise<void> {
-    return this.invoke("set_legal_hold", [active], source);
+  async setLegalHold(active: boolean, reason: string, source?: string): Promise<void> {
+    if (active && reason.trim().length === 0) {
+      throw new Error("reason must be non-empty when legal hold is activated (active=true)");
+    }
+    return this.invoke("set_legal_hold", [active, reason], source);
   }
 
   /** Propose a legal hold for guardian confirmation. Auth: current admin. */

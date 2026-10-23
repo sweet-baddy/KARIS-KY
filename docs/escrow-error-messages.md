@@ -40,7 +40,8 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Cancel / refund | 140–143 | Cancel funding and investor refunds | 140, 143 |
 | Legal-hold operations | 150–154 | Delayed compliance-hold lift workflow, terminal state guard | 150, 154 |
 | Beneficiary rotation | 160–162 | Governed SME address rotation | 160, 162 |
-| Admin handover / funding deadline | 163–164 | `accept_admin` and post-deadline funding | 163, 164 |
+| Yield slippage / funding deadline | 162–164 | Yield slippage detection and post-deadline funding | 162, 164 |
+| Admin handover / reserved | 181–183 | Admin handover pending, contract balance, reserved codes | 181, 183 |
 | Clone escrow | 170–171 | Clone settled escrow to create new instances | 170, 171 |
 | State export / import | 200–203 | Disaster recovery and network migration state snapshot and restore | 200, 203 |
 
@@ -145,11 +146,31 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 211 | `LegalHoldGuardianNotConfigured` | `propose_legal_hold` | escrow has no guardian | Use legacy `set_legal_hold(true)` or initialize with guardian | typed |
 | 212 | `LegalHoldAlreadyActive` | `propose_legal_hold` | hold is already active | Clear the current hold before proposing another | typed |
 | 213 | `LegalHoldGuardianSameAsAdmin` | `init_with_guardian` | guardian address equals admin address | Configure an independent guardian address | typed |
+| 217 | `LegalHoldBlocksMutation` | Non-whitelisted state-mutating entrypoints | legal hold active | Clear the hold or use an explicit recovery/maintenance entrypoint | typed |
 | 160 | `LegalHoldBlocksBeneficiaryRotation` | `rotate_beneficiary` | legal hold active | Clear hold before rotation | typed |
 | 161 | `RotationNotOpen` | `rotate_beneficiary` | status not `0` (open) or `1` (funded) | Rotation only before settlement | typed |
-| 162 | `NewSmeSameAsCurrent` | `rotate_beneficiary` | `new_sme == current sme_address` | Pass a different beneficiary | typed |
-| 163 | `NoPendingAdmin` | `accept_admin` | no pending admin nomination stored | Call `propose_admin` first | typed |
+| 162 | `YieldSlippageDetected` | `claim_investor_payout` | actual yield differs from expected yield exceeding configured threshold | Review yield configuration or threshold | typed |
+| 163 | `YieldSlippageThresholdOutOfRange` | `init` | yield slippage threshold not in `0..=10_000` bps | Fix slippage threshold configuration | typed |
 | 164 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
+| 165 | `DisputePausedBlocksFunding` | `fund`, `fund_with_commitment` | dispute pause active | Wait for dispute pause to expire or resume | typed |
+| 166 | `DisputePausedBlocksSettlement` | `settle` | dispute pause active | Wait for dispute pause to expire or resume | typed |
+| 167 | `DisputePausedBlocksWithdrawal` | `withdraw` | dispute pause active | Wait for dispute pause to expire or resume | typed |
+| 168 | `DisputePausedBlocksInvestorClaims` | `claim_investor_payout` | dispute pause active | Wait for dispute pause to expire or resume | typed |
+| 169 | `DisputePauseDurationNotPositive` | `pause_dispute` | pause duration `<= 0` | Pass a positive duration in seconds | typed |
+| 170 | `DisputeTicketIdEmpty` | `pause_dispute` | dispute ticket reference empty | Provide a non-empty ticket id | typed |
+| 171 | `NoPauseActive` | `resume_dispute` | no dispute pause currently active | Pause dispute first before resuming | typed |
+| 172 | `LedgerTimestampOverflow` | `pause_dispute`, `fund_with_commitment` | `now + duration` would overflow `u64` | Reduce duration or wait for lower timestamp | typed |
+| 173 | `InvestorNotVerified` | `fund`, `fund_with_commitment` | investor not verified by configured KYC provider | Complete KYC verification first | typed |
+| 174 | `InsufficientAdminRole` | admin-gated entrypoints | caller's admin role does not meet minimum required level | Require appropriate admin role | typed |
+| 175 | `InvalidAdminRoleList` | `set_admin_roles` | role list is empty, oversized, or contains duplicates | Pass valid non-empty unique role list | typed |
+| 176 | `MultisigThresholdInvalid` | `init_multisig_policy` | threshold is 0 or exceeds signer count | Set threshold between 1 and signer count | typed |
+| 177 | `MultisigSignerListInvalid` | `init_multisig_policy` | signers list is empty, oversized, or has duplicates | Pass valid non-empty unique signer list | typed |
+| 178 | `MultisigOperationsListEmpty` | `init_multisig_policy` | operations list is empty or oversized | Pass valid non-empty operations list | typed |
+| 179 | `MultisigInsufficientSigners` | multisig-gated entrypoints | fewer distinct signers than required threshold | Collect additional co-signatures | typed |
+| 180 | `MultisigSignerNotAuthorized` | multisig-gated entrypoints | signer not in policy or duplicate signer in call | Use authorized signers without duplicates | typed |
+| 181 | `NewSmeSameAsCurrent` | `rotate_beneficiary` | `new_sme == current sme_address` | Pass a different beneficiary | typed |
+| 182 | `NoPendingAdmin` | `accept_admin` | no pending admin nomination stored | Call `propose_admin` first | typed |
+| 183 | `InsufficientContractBalance` | `withdraw` | contract token balance `< funded_amount` | Ensure sufficient token balance in contract | typed |
 | 170 | `CloneNotSettled` | `clone_settled_escrow` | template escrow status `!= 2` (settled) | Use a settled escrow as template | typed |
 | 171 | `CloneAmountNotPositive` | `clone_settled_escrow` | `new_amount <= 0` | Pass a positive invoice amount for the clone | typed |
 | 200 | `ExportNotInitialized` | `export_state` | `DataKey::Escrow` missing (escrow not initialized) | Call `init` first | typed |
@@ -244,13 +265,28 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 152 | `legal hold clear delay overflow` |
 | 160 | `Legal hold blocks beneficiary rotation` |
 | 161 | `Beneficiary rotation not permitted in current escrow state` |
-| 162 | `New SME address must differ from current beneficiary` |
-| 163 | `No pending admin` |
+| 162 | `Yield slippage detected` |
+| 163 | `Yield slippage threshold out of range` |
 | 164 | `Funding deadline has passed` |
-| 200 | `Escrow not initialized (cannot export)` |
-| 201 | `Import target already initialized` |
-| 202 | `Import schema version mismatch` |
-| 203 | `Import checksum mismatch` |
+| 165 | `Dispute pause blocks funding` |
+| 166 | `Dispute pause blocks settlement` |
+| 167 | `Dispute pause blocks withdrawal` |
+| 168 | `Dispute pause blocks investor claims` |
+| 169 | `Dispute pause duration not positive` |
+| 170 | `Dispute ticket id empty` |
+| 171 | `No pause active` |
+| 172 | `Ledger timestamp overflow` |
+| 173 | `Investor not verified` |
+| 174 | `Insufficient admin role` |
+| 175 | `Invalid admin role list` |
+| 176 | `Multisig threshold invalid` |
+| 177 | `Multisig signer list invalid` |
+| 178 | `Multisig operations list empty` |
+| 179 | `Multisig insufficient signers` |
+| 180 | `Multisig signer not authorized` |
+| 181 | `New SME address must differ from current beneficiary` |
+| 182 | `No pending admin` |
+| 183 | `Insufficient contract balance` |
 
 ## Client Guidance
 
@@ -269,13 +305,14 @@ Recommended SDK category mappings:
 | 70–80, 82–83 | Administrative validation or batch-funding bounds failure |
 | 90–92 | Migration failure |
 | 100–111 | Funding failure |
-| 163 | Admin handover not pending |
-| 164 | Funding deadline expired |
+| 162–164 | Yield slippage or funding deadline failure |
+| 165–172 | Dispute pause or timestamp overflow failure |
+| 173–180 | KYC, admin role, or multisig policy failure |
+| 181–183 | Admin handover or contract balance failure |
 | 120–129 | Settlement, withdrawal, or investor payout failure |
 | 140–143 | Cancellation or refund failure |
 | 150–152 | Legal-hold clear workflow failure |
-| 160–162 | Beneficiary rotation failure |
-| 200–203 | State export/import failure (disaster recovery) |
+| 160–162 | Beneficiary rotation or yield slippage failure |
 
 ## Security Notes
 

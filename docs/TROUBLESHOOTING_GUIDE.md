@@ -618,11 +618,11 @@ If issues persist after following this guide:
 
 ## References
 
-- [ADR-001: State Model](docs/adr/ADR-001-state-model.md)
-- [ADR-002: Auth Boundaries](docs/adr/ADR-002-auth-boundaries.md)
-- [ADR-003: Settlement Flow](docs/adr/ADR-003-settlement-flow.md)
-- [ADR-004: Legal Hold](docs/adr/ADR-004-legal-hold.md)
-- [ADR-005: Tiered Yield](docs/adr/ADR-005-tiered-yield.md)
+- [ADR-001: State Model](adr/ADR-001-state-model.md)
+- [ADR-002: Auth Boundaries](adr/ADR-002-auth-boundaries.md)
+- [ADR-003: Settlement Flow](adr/ADR-003-settlement-flow.md)
+- [ADR-004: Legal Hold](adr/ADR-004-legal-hold.md)
+- [ADR-005: Tiered Yield](adr/ADR-005-tiered-yield.md)
 - [escrow-error-messages.md](escrow-error-messages.md) — Full error code reference
 - [escrow-pro-rata.md](escrow-pro-rata.md) — Payout math
 - [OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md) — Deployment and operations

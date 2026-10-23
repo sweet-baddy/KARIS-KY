@@ -145,6 +145,18 @@ export interface InvestorPosition {
   yield_claim_delegate: string | null;
 }
 
+/** One checkpoint entry in an investor's funding history. */
+export interface InvestorFundingRecord {
+  /** Kind of checkpoint: "deposit", "funding_close", or "settlement". */
+  checkpoint: string;
+  /** Ledger timestamp when this checkpoint was recorded. */
+  timestamp: string;
+  /** Amount associated with this checkpoint (deposit amount or payout at settlement). */
+  amount: string;
+  /** Investor's cumulative principal contribution as of this checkpoint. */
+  cumulative_total: string;
+}
+
 /** Snapshot payload returned by `export_state` and accepted by `import_state`. */
 export interface EscrowSnapshot {
   escrow: InvoiceEscrow;
@@ -169,6 +181,14 @@ export interface EscrowSnapshot {
   funding_deadline: string | null;
   pending_admin: string | null;
   checksum: string;
+}
+
+/** Investor capacity snapshot returned by `get_investor_cap_status`. */
+export interface InvestorCapStatus {
+  max: number;
+  current: number;
+  remaining: number;
+  is_full: boolean;
 }
 
 /** Structured error diagnostic emitted alongside contract errors. */
@@ -246,6 +266,8 @@ export const MAX_INVOICE_ID_STRING_LEN = 32;
 export const MAX_ATTESTATION_APPEND_ENTRIES = 32;
 export const MAX_INVESTOR_ALLOWLIST_BATCH = 32;
 export const MAX_FUND_BATCH = 50;
+export const MAX_INVESTOR_HISTORY_ENTRIES = 128;
+export const MAX_HISTORY_PAGE_SIZE = 50;
 export const MAX_DUST_SWEEP_AMOUNT = "100000000";
 
 // ---------------------------------------------------------------------------
@@ -289,15 +311,16 @@ export enum EscrowErrorCode {
   RecipientBalanceDeltaMismatch = 41,
   SweepExceedsLiabilityFloor = 42,
 
-  // Attestation (50–53)
+  // Attestation (50–52)
   PrimaryAttestationAlreadyBound = 50,
   AttestationAppendLogCapacityReached = 51,
-  AttestationHashAlreadyBound = 53,
+  InvalidAttestationHashLength = 52,
 
-  // SME collateral (60–62)
+  // SME collateral (60–63)
   CollateralAmountNotPositive = 60,
   CollateralAssetEmpty = 61,
   CollateralTimestampBackwards = 62,
+  CollateralUpdateAfterSettlement = 63,
 
   // Admin validation (70–83)
   InvestorBatchEmpty = 70,
@@ -368,7 +391,25 @@ export enum EscrowErrorCode {
   RotationNotOpen = 161,
   NewSmeSameAsCurrent = 162,
   NoPendingAdmin = 163,
-  FundingDeadlinePassed = 164,
+  InsufficientContractBalance = 164,
+
+  // Dispute pause + governance / role checks (165–180)
+  DisputePausedBlocksFunding = 165,
+  DisputePausedBlocksSettlement = 166,
+  DisputePausedBlocksWithdrawal = 167,
+  DisputePausedBlocksInvestorClaims = 168,
+  DisputePauseDurationNotPositive = 169,
+  DisputeTicketIdEmpty = 170,
+  NoPauseActive = 171,
+  LedgerTimestampOverflow = 172,
+  InvestorNotVerified = 173,
+  InsufficientAdminRole = 174,
+  InvalidAdminRoleList = 175,
+  MultisigThresholdInvalid = 176,
+  MultisigSignerListInvalid = 177,
+  MultisigOperationsListEmpty = 178,
+  MultisigInsufficientSigners = 179,
+  MultisigSignerNotAuthorized = 180,
 }
 
 /** Human-readable error descriptions keyed by error code. */
@@ -404,9 +445,11 @@ export const ESCROW_ERROR_LABELS: Record<number, string> = {
   42: "Sweep would exceed liability floor",
   50: "Primary attestation already bound",
   51: "Attestation append log capacity reached",
+  52: "Attestation hash must be exactly 32 bytes",
   60: "Collateral amount must be positive",
   61: "Collateral asset symbol must not be empty",
   62: "Collateral timestamp must not go backward",
+  63: "Collateral updates are blocked after settlement",
   70: "Investor batch must be non-empty",
   71: "Investor batch too large",
   72: "Target must be strictly positive",
@@ -463,7 +506,23 @@ export const ESCROW_ERROR_LABELS: Record<number, string> = {
   161: "Beneficiary rotation not permitted in current state",
   162: "New SME must differ from current beneficiary",
   163: "No pending admin",
-  164: "Funding deadline has passed",
+  164: "Contract funding token balance is below funded amount",
+  165: "Dispute pause blocks new funding",
+  166: "Dispute pause blocks settlement",
+  167: "Dispute pause blocks withdrawal",
+  168: "Dispute pause blocks investor claims",
+  169: "Dispute pause duration must be positive",
+  170: "Dispute ticket ID must not be empty",
+  171: "No dispute pause is active",
+  172: "Ledger timestamp overflow",
+  173: "Investor is not verified by the KYC provider",
+  174: "Caller does not have the required admin role",
+  175: "Admin role list is empty, oversized, or contains duplicates",
+  176: "Multisig threshold is invalid",
+  177: "Multisig signer list is invalid",
+  178: "Multisig operations list must not be empty",
+  179: "Multisig signers do not meet the threshold",
+  180: "Signer is not authorized for this multisig policy",
 };
 
 /** Category groupings for error codes to help SDK consumers branch on categories. */
@@ -481,6 +540,8 @@ export const ESCROW_ERROR_CATEGORIES: Record<string, { range: [number, number]; 
   legalHoldClear: { range: [150, 152], label: "Legal hold clear workflow failure" },
   legalHoldActivation: { range: [207, 213], label: "Legal hold activation failure" },
   beneficiary: { range: [160, 164], label: "Beneficiary / admin / deadline failure" },
+  dispute: { range: [165, 172], label: "Dispute pause / ledger safety failure" },
+  governance: { range: [173, 180], label: "KYC / role / multisig governance failure" },
 };
 
 /**

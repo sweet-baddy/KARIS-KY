@@ -31,6 +31,12 @@ path = "fuzz_targets/escrow_migrate.rs"
 test = false
 doc = false
 
+[[bin]]
+name = "escrow_attestations"
+path = "fuzz_targets/escrow_attestations.rs"
+test = false
+doc = false
+
 [dependencies]
 karis_ky_escrow = { path = ".." }
 soroban-sdk = { version = "25.0", features = ["testutils"] }

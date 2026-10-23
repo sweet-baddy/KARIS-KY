@@ -23,10 +23,10 @@ The administrator manages ongoing operations, including parameter updates, attes
 Before deploying to production, ensure the following:
 
 1. **Key Management**: Use a hardware wallet or secure key management solution for the deployer account.
-2. **Parameter Review**: Verify all initialization parameters against the [escrow-init-parameters.md](escrow-init-parameters.md) documentation.
-3. **Fund Parameters**: Confirm fund parameters match the [escrow-fund-parameters.md](escrow-fund-parameters.md) specification.
-4. **Attestations**: Review the [escrow-attestations.md](escrow-attestations.md) documentation for attestation requirements.
-5. **Compliance**: Ensure compliance requirements are met per the [escrow-compliance-guide.md](escrow-compliance-guide.md).
+2. **Parameter Review**: Verify all initialization parameters against the [escrow-init-parameters.md](docs/escrow-init-parameters.md) documentation.
+3. **Fund Parameters**: Confirm fund parameters match the [escrow-fund-parameters.md](docs/escrow-fund-parameters.md) specification.
+4. **Attestations**: Review the [escrow-attestations.md](docs/escrow-attestations.md) documentation for attestation requirements.
+5. **Compliance**: Ensure compliance requirements are met per the [escrow-compliance-guide.md](docs/escrow-compliance-guide.md).
 
 ## Key Management
 
@@ -126,15 +126,15 @@ Attackers may attempt to front-run deployment or configuration transactions.
 
 ## Compliance Considerations
 
-Deployers must ensure the system is configured to meet applicable regulatory requirements. See the [escrow-compliance-guide.md](escrow-compliance-guide.md) for detailed compliance procedures.
+Deployers must ensure the system is configured to meet applicable regulatory requirements. See the [escrow-compliance-guide.md](docs/escrow-compliance-guide.md) for detailed compliance procedures.
 
 ### Legal Holds
 
-Understand how legal holds interact with fund operations. See [escrow-legal-hold.md](escrow-legal-hold.md) for details.
+Understand how legal holds interact with fund operations. See [escrow-legal-hold.md](docs/escrow-legal-hold.md) for details.
 
 ## State Machine
 
-The escrow contracts follow a defined state machine. Review [state-machine.md](state-machine.md) to understand valid state transitions and their security implications.
+The escrow contracts follow a defined state machine. Review [state-machine.md](docs/state-machine.md) to understand valid state transitions and their security implications.
 
 ## Audit and Verification
 
@@ -145,6 +145,6 @@ The escrow contracts follow a defined state machine. Review [state-machine.md](s
 
 ## Additional Resources
 
-- [OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md) — Operational procedures
-- [investor-quick-start.md](investor-quick-start.md) — Investor onboarding
+- [OPERATOR_RUNBOOK.md](docs/OPERATOR_RUNBOOK.md) — Operational procedures
+- [investor-quick-start.md](docs/investor-quick-start.md) — Investor onboarding
 - [docs/glossary.md](docs/glossary.md) — Key terms and definitions

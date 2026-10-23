@@ -129,16 +129,15 @@ stateDiagram-v2
     state "LEGAL HOLD ACTIVE" as hold {
         direction LR
         note right of hold
-            Blocked entrypoints:
-            • fund / fund_with_commitment / fund_batch → EscrowError 102
-            • settle → EscrowError 120
-            • withdraw → EscrowError 123
-            • claim_investor_payout → EscrowError 125
-            • cancel_funding → EscrowError 140
-            • sweep_terminal_dust → EscrowError 30
+            All state-mutating entrypoints are blocked.
+            Risk operations keep specific legal-hold errors;
+            other mutations return LegalHoldBlocksMutation (217).
 
-            NOT blocked:
-            • propose_admin / accept_admin (recovery path)
+            Explicit exceptions:
+            • set/clear/request/propose/confirm legal hold
+            • propose_admin / accept_admin / transfer_admin
+            • bump_ttl (storage extension only)
+            • init (before an escrow exists)
             • All read-only entrypoints
         end note
     }

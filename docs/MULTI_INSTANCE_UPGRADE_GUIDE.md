@@ -396,5 +396,5 @@ cargo test test_full_version_upgrade_matrix
 - [ADR-007: Storage Key Evolution](../docs/adr/ADR-007-storage-key-evolution.md)
 - [OPERATOR_RUNBOOK.md](../docs/OPERATOR_RUNBOOK.md) — Redeploy vs. upgrade decision tree
 - [storage-reference.md](../docs/arch/storage-reference.md) — DataKey enum documentation
-- [upgrade_compat.rs](../../escrow/src/tests/upgrade_compat.rs) — Compatibility tests
+- [upgrade_compat.rs](../escrow/src/tests/upgrade_compat.rs) — Compatibility tests
 

@@ -217,8 +217,9 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::ConcentrationLimitExceeded, 166),
         (EscrowError::ConcentrationInvalidRange, 167),
         (EscrowError::LegalHoldReasonTooLong, 168),
+        (EscrowError::LegalHoldBlocksMutation, 217),
     ];
-    assert_eq!(TABLE.len(), 88);
+    assert_eq!(TABLE.len(), 89);
     for (variant, code) in TABLE {
         assert_eq!(*variant as u32, *code, "discriminant drift for code {code}");
     }
@@ -521,10 +522,7 @@ fn typed_error_codes_cover_range_boundaries() {
         migrate_client.try_migrate(&(SCHEMA_VERSION - 1)),
         EscrowError::MigrationVersionMismatch,
     );
-    assert_contract_error(
-        migrate_client.try_migrate(&SCHEMA_VERSION),
-        EscrowError::AlreadyCurrentSchemaVersion,
-    );
+    assert_eq!(migrate_client.migrate(&SCHEMA_VERSION), SCHEMA_VERSION);
     env.as_contract(&migrate_client.address, || {
         env.storage().instance().set(&DataKey::Version, &0u32);
     });
@@ -811,10 +809,8 @@ fn test_migrate_already_current() {
         &None,
     );
 
-    assert_contract_error(
-        client.try_migrate(&SCHEMA_VERSION),
-        EscrowError::AlreadyCurrentSchemaVersion,
-    );
+    assert_eq!(client.migrate(&SCHEMA_VERSION), SCHEMA_VERSION);
+    assert_eq!(client.get_version_history().len(), 2);
 }
 
 #[test]

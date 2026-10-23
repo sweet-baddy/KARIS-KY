@@ -301,7 +301,7 @@ Before releasing a new contract version:
 
 ## References
 
-- [ADR-002: Authorization Boundaries](docs/adr/ADR-002-auth-boundaries.md) — entrypoint roles
-- [docs/OPERATOR_RUNBOOK.md](docs/OPERATOR_RUNBOOK.md) — deployment procedures
-- [docs/escrow-error-messages.md](docs/escrow-error-messages.md) — stable error codes
+- [ADR-002: Authorization Boundaries](adr/ADR-002-auth-boundaries.md) — entrypoint roles
+- [docs/OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md) — deployment procedures
+- [docs/escrow-error-messages.md](escrow-error-messages.md) — stable error codes
 - [Issue #242](https://github.com/example/repo/issues/242) — two-step propose/execute upgrade guard
