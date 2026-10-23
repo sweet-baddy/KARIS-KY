@@ -43,7 +43,6 @@ export {
   type EscrowSnapshot,
   type ErrorDiagnostic,
   type EscrowTemplate,
-  type InvestorCapStatus,
   type InitParams,
   type AdminRole,
   type SorobanResult,

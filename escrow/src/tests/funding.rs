@@ -3830,18 +3830,28 @@ fn test_fund_batch_preserves_event_semantics() {
     entries.push_back((inv1.clone(), 30_000i128));
     entries.push_back((inv2.clone(), 50_000i128));
 
-    client.fund_batch(&entries);
+    let result = client.fund_batch(&entries);
 
-    // Verify events emitted
+    // The deprecated entrypoint delegates to batch_fund and emits its summary event.
+    let expected_summary = BatchFundCompleted {
+        name: symbol_short!("btch_fnd"),
+        invoice_id: result.invoice_id,
+        total_funded_amount: 80_000,
+        investor_count: 2,
+        escrow_funded_amount: 80_000,
+        status: 0,
+    }
+    .to_xdr(&env, &contract_id);
     let events = env.events().all();
     assert_eq!(
-        events.events().len(),
-        2,
-        "should emit 2 EscrowFunded events"
+        events
+            .events()
+            .iter()
+            .filter(|event| **event == expected_summary)
+            .count(),
+        1,
+        "deprecated fund_batch must emit one canonical batch summary event"
     );
-
-    // Each event corresponds to a fund operation
-    // (Detailed event field verification depends on EscrowFunded structure)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

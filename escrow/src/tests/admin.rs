@@ -2788,6 +2788,8 @@ fn test_get_dispute_pause_returns_none_after_expiry() {
         &pause_duration,
     );
 
+    assert!(client.is_dispute_pause_active());
+
     // get_dispute_pause returns Some while active.
     let state = client.get_dispute_pause();
     assert!(
@@ -2802,6 +2804,11 @@ fn test_get_dispute_pause_returns_none_after_expiry() {
 
     // Advance past expiry.
     env.ledger().set_timestamp(paused_at + pause_duration);
+
+    assert!(!client.is_dispute_pause_active());
+    let stored_state: Option<crate::DisputePauseState> =
+        env.storage().instance().get(&crate::DataKey::DisputePaused);
+    assert!(stored_state.is_some(), "read-only getter must not mutate storage");
 
     // get_dispute_pause returns None (the pause is logically expired).
     let state_after = client.get_dispute_pause();

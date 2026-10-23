@@ -4752,51 +4752,12 @@ impl LiquifactEscrow {
         escrow
     }
 
-    /// Batch funding entrypoint: record multiple investor principals in a single call.
+    /// Deprecated: use [`LiquifactEscrow::batch_fund`] instead.
     ///
-    /// Each entry is processed sequentially with per-investor [`Address::require_auth()`].
-    /// All existing [`LiquifactEscrow::fund`] invariants (allowlist, caps, min contribution,
-    /// overflow guards) are enforced per entry. If an entry fails its invariants,
-    /// the call returns an error without corrupting prior entries.
-    ///
-    /// # Parameters
-    /// - `entries`: `Vec<(Address, i128)>` of (investor address, funding amount) tuples.
-    ///
-    /// # Errors
-    /// - [`EscrowError::FundingBatchEmpty`] if entries is empty
-    /// - [`EscrowError::FundingBatchTooLarge`] if entries.len() > [`MAX_FUND_BATCH`]
-    /// - Per-entry: all errors from [`LiquifactEscrow::fund`] for that investor/amount pair
-    ///
-    /// # Events
-    /// One [`EscrowFunded`] event per entry (identical to single [`LiquifactEscrow::fund`] semantics).
-    ///
-    /// # Funded-target snapshot
-    /// If any entry causes the escrow to transition to **funded** (status 0 → 1),
-    /// [`DataKey::FundingCloseSnapshot`] is recorded exactly once. Remaining entries are
-    /// processed even after transition.
+    /// This compatibility entrypoint delegates to [`LiquifactEscrow::batch_fund`].
+    #[deprecated(note = "Use batch_fund instead.")]
     pub fn fund_batch(env: Env, entries: Vec<(Address, i128)>) -> InvoiceEscrow {
-        let n = entries.len();
-
-        ensure(&env, n > 0, EscrowError::FundingBatchEmpty);
-        ensure(&env, n <= MAX_FUND_BATCH, EscrowError::FundingBatchTooLarge);
-
-        // Load the escrow once before the loop; apply all entries in memory and
-        // persist exactly once after the loop to avoid per-entry read/write pairs.
-        let mut escrow = Self::get_escrow(env.clone());
-        ensure(
-            &env,
-            escrow.status == 0,
-            EscrowError::EscrowNotOpenForFunding,
-        );
-
-        for i in 0..n {
-            let (investor, amount) = entries.get(i).unwrap();
-            Self::fund_impl(&env, &mut escrow, investor, amount, true, 0, true);
-        }
-
-        env.storage().instance().set(&DataKey::Escrow, &escrow);
-
-        escrow
+        Self::batch_fund(env, entries)
     }
 
     /// Batch funding entrypoint: record multiple investor principals in a single atomic call
@@ -7507,6 +7468,14 @@ impl LiquifactEscrow {
             }
         }
         None
+    }
+
+    /// Check whether a dispute pause is currently active.
+    ///
+    /// Returns `false` when no pause is stored or when its expiry timestamp has been reached.
+    /// This read-only getter does not remove expired pause state or emit events.
+    pub fn is_dispute_pause_active(env: Env) -> bool {
+        Self::is_dispute_paused(&env)
     }
 
     /// Read-only aggregate view of an investor's position in this escrow.

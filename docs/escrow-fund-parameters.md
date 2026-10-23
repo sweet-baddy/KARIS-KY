@@ -9,6 +9,9 @@ This document describes parameters and behavior for both funding entrypoints:
 alongside [Escrow Init Parameters](escrow-init-parameters.md),
 [Escrow Lifecycle](escrow-lifecycle.md), and [ADR-005: Tiered Yield](adr/ADR-005-tiered-yield.md).
 
+For multi-investor deposits, use [`batch_fund`](#batch_fund). The legacy `fund_batch`
+entrypoint remains available for compatibility but is deprecated and delegates to `batch_fund`.
+
 ---
 
 ## Quick Comparison: `fund` vs. `fund_with_commitment`
@@ -97,6 +100,18 @@ const escrow = await client.fund(investorAddress, "10000000000"); // 10,000 toke
 console.log(`Escrow status: ${escrow.status}`); // 0 = Open, 1 = Funded
 console.log(`Total funded: ${escrow.funded_amount}`);
 ```
+
+## `batch_fund` — Batch Investor Deposits
+
+### Signature
+
+```rust
+pub fn batch_fund(env: Env, contributions: Vec<(Address, i128)>) -> InvoiceEscrow
+```
+
+Each contribution is validated with the same funding rules as `fund` and requires
+authorization from its investor. A successful call emits the per-investor funding events and
+one `BatchFundCompleted` summary event. Batches must contain 1 to 50 entries.
 
 ---
 

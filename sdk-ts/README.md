@@ -107,7 +107,7 @@ try {
 | `init()` | Initialize escrow | admin |
 | `fund()` | Record investor principal | investor |
 | `fundWithCommitment()` | First deposit with tiered yield | investor |
-| `fundBatch()` | Batch fund multiple investors | per-investor |
+| `batchFund()` | Batch fund multiple investors | per-investor |
 | `settle()` | Mark escrow as settled | sme_address |
 | `withdraw()` | SME withdraws liquidity | sme_address |
 | `claimInvestorPayout()` | Investor claims payout after settlement | investor |

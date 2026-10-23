@@ -30,7 +30,7 @@ stateDiagram-v2
 
     [*] --> open : init() [admin auth]
 
-    open --> funded : fund() / fund_with_commitment() / fund_batch()\nwhen funded_amount ≥ funding_target\n[investor auth]
+    open --> funded : fund() / fund_with_commitment() / batch_fund()\nwhen funded_amount ≥ funding_target\n[investor auth]
 
     open --> cancelled : cancel_funding()\n[admin auth]
 
@@ -56,7 +56,7 @@ stateDiagram-v2
 
 | Operation | Allowed | Notes |
 |-----------|---------|-------|
-| `fund` / `fund_with_commitment` / `fund_batch` | ✅ Yes | Blocked by legal hold or dispute pause |
+| `fund` / `fund_with_commitment` / `batch_fund` | ✅ Yes | Blocked by legal hold or dispute pause |
 | `cancel_funding` | ✅ Yes | Blocked by legal hold |
 | `settle` | ❌ No | `EscrowError::SettlementNotFunded` (121) |
 | `withdraw` | ❌ No | `EscrowError::WithdrawalNotFunded` (124) |
@@ -168,7 +168,7 @@ stateDiagram-v2
         direction LR
         note right of pause
             Blocked entrypoints:
-            • fund / fund_with_commitment / fund_batch → EscrowError 165
+            • fund / fund_with_commitment / batch_fund → EscrowError 165
             • settle → EscrowError 166
             • withdraw → EscrowError 167
             • claim_investor_payout → EscrowError 168
@@ -256,7 +256,7 @@ stateDiagram-v2
         direction LR
         note right of HoldActive
             ✋ BLOCKED OPERATIONS (panic immediately):
-            • fund() / fund_with_commitment() / fund_batch()
+            • fund() / fund_with_commitment() / batch_fund()
               → EscrowError::LegalHoldBlocksFunding (102)
             • settle()
               → EscrowError::LegalHoldBlocksSettlement (120)
@@ -309,7 +309,7 @@ stateDiagram-v2
         direction LR
         note right of PauseActive
             ✋ BLOCKED OPERATIONS (panic immediately):
-            • fund() / fund_with_commitment() / fund_batch()
+            • fund() / fund_with_commitment() / batch_fund()
               → EscrowError::DisputePausedBlocksFunding (165)
             • settle()
               → EscrowError::DisputePausedBlocksSettlement (166)
@@ -595,7 +595,7 @@ conditions exist.
 
 | Entrypoint | Status 0 (open) | Status 1 (funded) | Status 2–4 (terminal) | Status 5 (archived) | Blocked by legal hold? | Blocked by dispute pause? |
 |-----------|---|---|---|---|---|---|
-| `fund` / `fund_with_commitment` / `fund_batch` | ✅ | ❌ (103) | ❌ (103) | ❌ (read-only) | ✋ Yes (102) | ✋ Yes (165) |
+| `fund` / `fund_with_commitment` / `batch_fund` | ✅ | ❌ (103) | ❌ (103) | ❌ (read-only) | ✋ Yes (102) | ✋ Yes (165) |
 | `settle` | ❌ (121) | ✅ | ❌ (121) | ❌ (read-only) | ✋ Yes (120) | ✋ Yes (166) |
 | `withdraw` | ❌ (124) | ✅ | ❌ (124) | ❌ (read-only) | ✋ Yes (123) | ✋ Yes (167) |
 | `claim_investor_payout` | ❌ (127) | ❌ (127) | ✅ (if status 2) | ❌ (read-only) | ✋ Yes (125) | ✋ Yes (168) |

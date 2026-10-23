@@ -197,8 +197,8 @@ Error codes are grouped by domain so SDKs can map categories without parsing var
 | 77 | `NewCapNotLower` | New cap not strictly lower | Pass a strictly lower cap value |
 | 78 | `NewCapBelowCurrentFunderCount` | Cap lower than existing funders | Cannot evict existing investors |
 | 80 | `NewAdminSameAsCurrent` | Proposed admin equals current | Nominate a different admin |
-| 82 | `FundingBatchEmpty` | Empty entries in `fundBatch` | Pass at least one (investor, amount) pair |
-| 83 | `FundingBatchTooLarge` | More than 50 entries in `fundBatch` | Split into smaller batches (max 50) |
+| 82 | `FundingBatchEmpty` | Empty contributions in `batchFund` | Pass at least one (investor, amount) pair |
+| 83 | `FundingBatchTooLarge` | More than 50 contributions in `batchFund` | Split into smaller batches (max 50) |
 | 104 | `InvestorNotAllowlisted` | Investor not on allowlist | Add via `setInvestorsAllowlisted` |
 | 163 | `NoPendingAdmin` | `acceptAdmin` with no pending | Call `proposeAdmin` first |
 | 164 | `FundingDeadlinePassed` | Funding past deadline | Funding window closed |
