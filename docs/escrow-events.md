@@ -83,7 +83,7 @@ Emitted when an investor deposits principal.
 ```
 
 ### `BatchFunded`
-Emitted once per `fund_batch` call after all per-investor deposits in the batch have
+Emitted once per `batch_fund` call after all per-investor deposits in the batch have
 been applied. Indexers should treat this as the batch-level summary and continue to
 rely on the per-investor `EscrowFunded` events for individual positions.
 

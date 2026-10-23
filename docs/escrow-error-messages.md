@@ -35,7 +35,7 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Admin validation | 70–80 | Allowlist batch, funding target, investor cap, maturity, admin handover | 70, 80 |
 | Schema migration | 90–92 | `migrate` version checks | 90, 92 |
 | Funding | 100–111 | Investor deposits, batch funding, and contribution limits | 100, 111 |
-| Funding batch | 82–83 | [`fund_batch`] entry count bounds | 82, 83 |
+| Funding batch | 82–83 | [`batch_fund`] entry count bounds | 82, 83 |
 | Settlement / payout | 120–129 | Settle, withdraw, investor claims, payout math | 120, 129 |
 | Cancel / refund | 140–143 | Cancel funding and investor refunds | 140, 143 |
 | Legal-hold operations | 150–154 | Delayed compliance-hold lift workflow, terminal state guard | 150, 154 |
@@ -102,8 +102,8 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 78 | `NewCapBelowCurrentFunderCount` | `lower_max_unique_investors` | `new_cap < unique funder count` | Cap cannot evict existing funders | typed |
 | 79 | `MaturityUpdateNotOpen` | `update_maturity` | escrow status `!= 0` | Only update maturity while open | typed |
 | 80 | `NewAdminSameAsCurrent` | `propose_admin` | proposed admin equals current admin | Nominate a different admin | typed |
-| 82 | `FundingBatchEmpty` | `fund_batch` | `entries.len() == 0` | Pass at least one `(investor, amount)` pair | typed |
-| 83 | `FundingBatchTooLarge` | `fund_batch` | `entries.len() > MAX_FUND_BATCH` | Split into smaller batches | typed |
+| 82 | `FundingBatchEmpty` | `batch_fund` | `contributions.len() == 0` | Pass at least one `(investor, amount)` pair | typed |
+| 83 | `FundingBatchTooLarge` | `batch_fund` | `contributions.len() > MAX_FUND_BATCH` | Split into smaller batches | typed |
 | 90 | `MigrationVersionMismatch` | `migrate` | stored version `!= from_version` | Pass matching `from_version` | typed |
 | 91 | `AlreadyCurrentSchemaVersion` | `migrate` | `from_version >= SCHEMA_VERSION` | No migration needed | typed |
 | 92 | `NoMigrationPath` | `migrate` | `from_version < SCHEMA_VERSION` and no transform implemented | Redeploy or extend `migrate` | typed |
@@ -118,7 +118,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 107 | `UniqueInvestorCapReached` | `fund`, `fund_with_commitment` | new investor and `unique funder count >= max_unique_investors` | Cap reached; wait or use existing investor | typed |
 | 108 | `TieredSecondDeposit` | `fund_with_commitment` | investor already has principal and calls `fund_with_commitment` again | Use `fund()` for additional principal | typed |
 | 109 | `InvestorClaimTimeOverflow` | `fund_with_commitment` | `timestamp + lock_secs` overflows | Reduce lock duration | typed |
-| 110 | `FundedAmountOverflow` | `fund`, `fund_with_commitment`, `fund_batch` | `funded_amount + amount` overflows | Reduce deposit size | typed |
+| 110 | `FundedAmountOverflow` | `fund`, `fund_with_commitment`, `batch_fund` | `funded_amount + amount` overflows | Reduce deposit size | typed |
 | 111 | `CommitmentLockExceedsMaturity` | `fund_with_commitment` | `now + committed_lock_secs > maturity` (when maturity > 0) | Shorten lock or extend maturity before deposit | typed |
 | 120 | `LegalHoldBlocksSettlement` | `settle` | legal hold active | Complete legal-hold clear workflow | typed |
 | 121 | `SettlementNotFunded` | `settle` | escrow status `!= 1` (funded) | Fund escrow before settlement | typed |
@@ -137,7 +137,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 150 | `LegalHoldClearRequestMissing` | `set_legal_hold(false)`, `clear_legal_hold` | clearing with non-zero delay but no prior `request_clear_legal_hold` | Call `request_clear_legal_hold` first | typed |
 | 151 | `LegalHoldClearNotReady` | `set_legal_hold(false)`, `clear_legal_hold` | `ledger.timestamp() < clearable_at` | Wait until clear delay elapses | typed |
 | 152 | `LegalHoldClearDelayOverflow` | `request_clear_legal_hold` | `timestamp + delay` overflows `u64` | Reduce delay or timestamp | typed |
-| 153 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
+| 153 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `batch_fund` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
 | 154 | `LegalHoldSetOnTerminalEscrow` | `set_legal_hold` | escrow status >= 2 (settled, withdrawn, cancelled, archived) | Hold cannot be set on completed escrows | typed |
 | 207 | `LegalHoldRequiresGuardianConfirmation` | `set_legal_hold(true)`, `set_legal_hold_multisig(true)` | guardian configured and immediate activation attempted | Use `propose_legal_hold` then `confirm_legal_hold` | typed |
 | 208 | `LegalHoldProposalMissing` | `confirm_legal_hold` | no proposal is pending | Call `propose_legal_hold` first | typed |
@@ -151,7 +151,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 161 | `RotationNotOpen` | `rotate_beneficiary` | status not `0` (open) or `1` (funded) | Rotation only before settlement | typed |
 | 162 | `YieldSlippageDetected` | `claim_investor_payout` | actual yield differs from expected yield exceeding configured threshold | Review yield configuration or threshold | typed |
 | 163 | `YieldSlippageThresholdOutOfRange` | `init` | yield slippage threshold not in `0..=10_000` bps | Fix slippage threshold configuration | typed |
-| 164 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
+| 164 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `batch_fund` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
 | 165 | `DisputePausedBlocksFunding` | `fund`, `fund_with_commitment` | dispute pause active | Wait for dispute pause to expire or resume | typed |
 | 166 | `DisputePausedBlocksSettlement` | `settle` | dispute pause active | Wait for dispute pause to expire or resume | typed |
 | 167 | `DisputePausedBlocksWithdrawal` | `withdraw` | dispute pause active | Wait for dispute pause to expire or resume | typed |
@@ -228,8 +228,8 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 78 | `new cap cannot be below current unique funder count` |
 | 79 | `Maturity can only be updated in Open state` |
 | 80 | `New admin must differ from current admin` |
-| 82 | `fund_batch entries vector must be non-empty` |
-| 83 | `fund_batch entries vector length exceeds MAX_FUND_BATCH` |
+| 82 | `batch_fund contributions vector must be non-empty` |
+| 83 | `batch_fund contributions vector length exceeds MAX_FUND_BATCH` |
 | 90 | `from_version does not match stored version` |
 | 91 | `Already at current schema version` |
 | 92 | `No migration path from version 0 - extend migrate or redeploy` |

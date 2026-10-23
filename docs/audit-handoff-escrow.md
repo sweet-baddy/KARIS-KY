@@ -76,7 +76,7 @@ These map directly to property tests in `escrow/src/tests/properties.rs` and rel
 |------|-----------|------------------------|
 | `admin` | `InvoiceEscrow::admin` (rotatable via `propose_admin` + `accept_admin`) | `init`, `set_legal_hold`, `request_clear_legal_hold`, `clear_legal_hold`, `update_maturity`, `update_funding_target`, `lower_max_unique_investors`, `propose_admin`, `accept_admin`, `migrate`, `bind_primary_attestation_hash`, `append_attestation_digest`, `cancel_funding`, `pause_dispute`, `resume_dispute`, `set_investors_allowlisted`, `export_state`, `import_state`, `archive` |
 | `sme_address` | `InvoiceEscrow::sme_address` (rotatable via `rotate_beneficiary`) | `settle`, `withdraw`, `record_sme_collateral_commitment` |
-| `investor` | per-call argument (verified via `require_auth`) | `fund`, `fund_with_commitment`, `fund_batch`, `claim_investor_payout`, `refund` |
+| `investor` | per-call argument (verified via `require_auth`) | `fund`, `fund_with_commitment`, `batch_fund`, `claim_investor_payout`, `refund` |
 | `treasury` | `DataKey::Treasury` (immutable) | `sweep_terminal_dust` |
 
 **No superuser path exists.** The admin cannot sweep dust unless it is also the treasury. A compromised investor key cannot settle, withdraw, or sweep.
@@ -85,7 +85,7 @@ These map directly to property tests in `escrow/src/tests/properties.rs` and rel
 
 When `DataKey::LegalHold == true`, the following entrypoints fail immediately with a typed error:
 
-- `fund` / `fund_with_commitment` / `fund_batch` (code 102)
+- `fund` / `fund_with_commitment` / `batch_fund` (code 102)
 - `settle` (code 120)
 - `withdraw` (code 123)
 - `claim_investor_payout` (code 125)
@@ -194,7 +194,7 @@ All seven codes in the dust-sweep / SEP-41 safety range (30–42) are complete a
 | `init` | `EscrowInitialized` | `escrow_ii` | Index `invoice_id`; register `funding_token` and `treasury` addresses; start monitoring |
 | `fund` | `EscrowFunded` | `funded` | Update investor contribution ledger; check `status` field for funded transition |
 | `fund_with_commitment` | `EscrowFunded` | `funded` | Same as `fund`; also record `investor_effective_yield_bps` and claim-lock timestamp |
-| `fund_batch` | `EscrowFunded` (per entry) | `funded` | Same as `fund`; batch reconcile all entries |
+| `batch_fund` | `EscrowFunded` (per entry) and `BatchFundCompleted` | `funded` | Reconcile all entries and the batch summary |
 | `settle` | `EscrowSettled` | `escrow_sd` | Trigger off-chain pro-rata payout calculation using `FundingCloseSnapshot` + per-investor `get_contribution` |
 | `settle` (fee path) | `ProtocolFeeCollected` | `fee_coll` | Record protocol fee in treasury reconciliation system |
 | `withdraw` | `SmeWithdrew` | `sme_wd` | Record SME liquidity event; update invoice status in off-chain ledger |

@@ -91,17 +91,8 @@
       "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state" }
     },
     {
-      "name": "fund_batch",
-      "description": "Process multiple investor contributions in a single call. Max 50 entries.",
-      "auth": "per-investor",
-      "params": [
-        { "name": "entries", "type": "Vec<(Address, i128)>", "description": "Vector of (investor_address, amount) pairs; max 50" }
-      ],
-      "returns": { "type": "InvoiceEscrow", "description": "Updated escrow state" }
-    },
-    {
       "name": "batch_fund",
-      "description": "Atomic multi-investor funding in a single transaction (FEAT-001). Requires per-investor auth for each entry. Emits per-entry EscrowFunded/FundReceived events and one BatchFundCompleted summary event. Max 50 entries.",
+      "description": "Canonical atomic multi-investor funding entrypoint (FEAT-001). Requires per-investor auth for each entry. Emits per-entry EscrowFunded/FundReceived events and one BatchFundCompleted summary event. Max 50 entries.",
       "auth": "per-investor",
       "params": [
         { "name": "contributions", "type": "Vec<(Address, i128)>", "description": "Vector of (investor_address, amount) pairs; max 50. Each entry requires that investor's require_auth()." }
@@ -357,6 +348,7 @@
     { "name": "get_registry_ref", "description": "Read optional registry hint (null when unset)", "returns": { "type": "Option<Address>" } },
     { "name": "get_pending_admin", "description": "Read pending admin in handover", "returns": { "type": "Option<Address>" } },
     { "name": "get_legal_hold", "description": "Check if legal hold is active", "returns": { "type": "bool" } },
+    { "name": "is_dispute_pause_active", "description": "Check whether a dispute pause exists and has not expired", "returns": { "type": "bool" } },
     { "name": "get_contribution", "description": "Read principal for one investor", "params": [{ "name": "investor", "type": "Address" }], "returns": { "type": "i128" } },
     { "name": "get_investor_position", "description": "Read aggregated position for one investor", "params": [{ "name": "investor", "type": "Address" }], "returns": { "type": "InvestorPosition" } },
     { "name": "get_unique_funder_count", "description": "Count of distinct investor addresses", "returns": { "type": "u32" } },
@@ -498,7 +490,7 @@
     "MAX_INVOICE_ID_STRING_LEN": { "value": 32, "type": "u32", "description": "Max UTF-8 byte length for invoice_id string; must be 1..=32 ASCII characters from [A-Za-z0-9_]" },
     "MAX_ATTESTATION_APPEND_ENTRIES": { "value": 32, "type": "u32", "description": "Max attestation append log entries" },
     "MAX_INVESTOR_ALLOWLIST_BATCH": { "value": 32, "type": "u32", "description": "Max allowlist batch mutation size" },
-    "MAX_FUND_BATCH": { "value": 50, "type": "u32", "description": "Max fund_batch entries per call" },
+    "MAX_FUND_BATCH": { "value": 50, "type": "u32", "description": "Max batch_fund entries per call" },
     "MAX_DUST_SWEEP_AMOUNT": { "value": 100000000, "type": "i128", "description": "Max dust sweep per call in base units" },
     "INSTANCE_TTL_MIN_EXTENSION_LEDGERS": { "value": 3600, "type": "u32", "description": "Min instance storage TTL extension (~1h)" },
     "PERSISTENT_TTL_MIN_EXTENSION_LEDGERS": { "value": 3600, "type": "u32", "description": "Min persistent storage TTL extension (~1h)" }

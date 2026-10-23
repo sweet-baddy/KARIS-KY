@@ -766,6 +766,20 @@ describe("EscrowClient Integration Tests", () => {
     });
   });
 
+  describe("is_dispute_pause_active", () => {
+    it("simulates the effective dispute pause status", async () => {
+      stub.clearInvocationLog();
+      stub.setResponse("is_dispute_pause_active", false);
+
+      const active = await client.isDisputePauseActive();
+
+      expect(active).toBe(false);
+      expect(stub.getInvocationLog()).toEqual([
+        { method: "simulate", functionName: "is_dispute_pause_active", args: [] },
+      ]);
+    });
+  });
+
   // =========================================================================
   // Test: Metadata and Version Queries
   // =========================================================================

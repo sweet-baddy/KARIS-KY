@@ -56,9 +56,9 @@ forbidden regressions, and interaction rules between `withdraw` vs `settle` path
 
 ---
 
-## Batch funding (`fund_batch`)
+## Batch funding (`batch_fund`)
 
-`fund_batch(entries: Vec<(Address, i128)>)` processes multiple investor contributions in a single call,
+`batch_fund(contributions: Vec<(Address, i128)>)` processes multiple investor contributions in a single call,
 reducing transaction overhead for primary issuance workflows.
 
 **Semantics:**
@@ -67,6 +67,7 @@ reducing transaction overhead for primary issuance workflows.
 - All existing [`fund()`](../escrow/src/lib.rs#L1444) invariants (allowlist, caps, min contribution, overflow guards)
   are enforced per entry
 - One `EscrowFunded` event is emitted per entry
+- One `BatchFundCompleted` summary event is emitted after all entries succeed
 - If any entry fails its invariants, the call returns an error **without corrupting prior entries**
   (Soroban's transaction atomicity ensures consistent state)
 
@@ -87,7 +88,7 @@ let entries = vec![
     (investor_b, 55_000i128),
     (investor_c, 10_000i128),
 ];
-let result = fund_batch(entries); // All three funded in one call
+let result = batch_fund(entries); // All three funded in one call
 ```
 
 ---
@@ -96,7 +97,7 @@ let result = fund_batch(entries); // All three funded in one call
 
 | From | To | Trigger | Auth required |
 |------|----|---------|--------------|
-| `0` (open) | `1` (funded) | `fund()`, `fund_with_commitment()`, or `fund_batch()` when `funded_amount >= funding_target` | Investor auth (per-investor for batch) |
+| `0` (open) | `1` (funded) | `fund()`, `fund_with_commitment()`, or `batch_fund()` when `funded_amount >= funding_target` | Investor auth (per-investor for batch) |
 | `0` (open) | `4` (cancelled) | `cancel_funding()` | Admin auth; legal hold must be inactive |
 | `1` (funded) | `2` (settled) | `settle()` | SME auth; legal hold must be inactive; if `maturity > 0`, ledger timestamp must be >= maturity |
 | `1` (funded) | `3` (withdrawn) | `withdraw()` | SME auth; legal hold must be inactive |

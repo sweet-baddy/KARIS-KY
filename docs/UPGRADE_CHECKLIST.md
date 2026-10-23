@@ -253,16 +253,16 @@ done
 ### Restore investor data (if already funded)
 
 - [ ] Enumerate pre-redeploy contributions from indexer
-- [ ] For each investor, call `fund()` or `fund_batch()` on new instance
+- [ ] For each investor, call `fund()` or `batch_fund()` on new instance
 - [ ] Verify `funded_amount` matches pre-redeploy snapshot
 
 ```bash
-# Example: fund_batch restore
+# Example: batch_fund restore
 stellar contract invoke \
   --id $NEW_CID \
   --source $SOURCE_SECRET \
   --network mainnet \
-  -- fund_batch --entries '[{"investor":"G...","amount":"100000000"}]'
+  -- batch_fund --contributions '[{"investor":"G...","amount":"100000000"}]'
 ```
 
 - [ ] All investor contributions restored

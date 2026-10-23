@@ -230,7 +230,7 @@ Provides a timelock safety window when clearing a compliance hold.
 
 ### 15. `funding_deadline` — Funding Window Closure
 
-A ledger timestamp after which `fund`/`fund_with_commitment`/`fund_batch` calls
+A ledger timestamp after which `fund`/`fund_with_commitment`/`batch_fund` calls
 are rejected with Code 164 (`FundingDeadlinePassed`).
 
 | Aspect | Detail |

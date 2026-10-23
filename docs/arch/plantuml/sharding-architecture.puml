@@ -25,7 +25,7 @@ package "Soroban Environment" {
             - unique_funder_count: u32
             --
             + fund(investor, amount)
-            + fund_batch(entries)
+            + batch_fund(contributions)
             + settle()
             + claim_investor_payout(investor)
             + aggregate_shard_state(): ShardAggregateState

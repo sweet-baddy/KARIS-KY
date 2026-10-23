@@ -38,7 +38,7 @@ v6 WASM settling:    v6 escrows only ✓
 
 ---
 
-### Funding operations (fund, fund_batch)
+### Funding operations (fund, batch_fund)
 
 ```
 v1 WASM funding:     v1 escrows ✓
@@ -118,7 +118,7 @@ stellar contract invoke --id $V5_INSTANCE -- get_escrow
 # Re-record in v6 instance (before investor claims)
 stellar contract invoke \
   --id $V6_INSTANCE \
-  -- fund_batch \
+  -- batch_fund \
   --entries '[{"investor":"G...","amount":"1000000"}]'
 ```
 
@@ -241,7 +241,7 @@ New WASM version: M
 ### v5 → v6 (mandatory redeploy)
 - [ ] Create new v6 instances (matching v5 invoice IDs)
 - [ ] Init each v6 instance with same parameters as v5
-- [ ] Restore investor records (fund_batch with pre-redeploy data)
+- [ ] Restore investor records (batch_fund with pre-redeploy data)
 - [ ] Verify escrow state matches v5 (funded_amount, etc.)
 - [ ] Retire v5 instances (legal hold + archive)
 - [ ] Update all external pointers (indexer, API, UI)
