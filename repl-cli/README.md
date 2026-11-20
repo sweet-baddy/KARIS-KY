@@ -193,6 +193,47 @@ repl-cli> fund-batch investors.csv
 }
 ```
 
+### Entrypoint help (`help <entrypoint>`)
+
+Every contract entrypoint has help text generated from `sdk-ts/spec.json`
+(description, required auth, arguments with types, and return type).
+`help` with no argument lists all entrypoint names.
+
+```
+$ repl-cli help settle
+$ repl-cli help          # list every entrypoint
+```
+
+### Tab completion (`complete <prefix>`)
+
+Entrypoint names complete from the contract spec. `complete <prefix>` prints
+all matching entrypoints (sorted), suitable for wiring into shell completion:
+
+```
+$ repl-cli complete fund
+fund
+fund_batch
+fund_with_commitment
+```
+
+### JSON output (`--json`)
+
+Pass `--json` anywhere on the command line to emit the parsed command as a
+single JSON object instead of human-readable text, for consumption by scripts:
+
+```
+$ repl-cli --json fund GABC 100
+{"args":["GABC","100"],"command":"fund","known_entrypoint":true}
+```
+
+### RPC retry policy
+
+Read-only RPC calls are wrapped in `retry_read`: transient failures
+(timeouts, connection resets, 5xx) are retried up to **3 attempts total** with
+exponential backoff starting at **100ms** (100ms, 200ms). Fatal errors are
+returned immediately. Mutating calls are **never** retried, to avoid
+applying a write twice.
+
 ### `quit` / `exit`
 
 **Purpose**: Exit the REPL CLI.

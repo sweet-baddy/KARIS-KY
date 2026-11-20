@@ -12,6 +12,8 @@
 //! items that actually exist (for example [`parse_input`]) and verify with
 //! `cargo doc --workspace --no-deps`.
 
+mod repl;
+
 /// Validates and normalizes a raw command-line input string.
 ///
 /// The input is trimmed of surrounding whitespace. Empty (or
@@ -36,16 +38,41 @@ fn parse_input(input: &str) -> Result<&str, &'static str> {
 /// `"status"`), validates it via [`parse_input`], and prints the result.
 /// Exits with a non-zero status code when the input is invalid.
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let command = args
-        .get(1)
-        .cloned()
-        .unwrap_or_else(|| "status".to_string());
+    let mut args: Vec<String> = std::env::args().collect();
+    let json_mode = args.iter().any(|a| a == "--json");
+    args.retain(|a| a != "--json");
+    let command = args.get(1).cloned().unwrap_or_else(|| "status".to_string());
 
     match parse_input(&command) {
         Ok(command) => {
+            if json_mode {
+                println!(
+                    "{}",
+                    repl::command_json(command, &args[2.min(args.len())..])
+                );
+                return;
+            }
             println!("KARIS-KY REPL CLI");
-            if command == "fund-batch" {
+            if command == "help" {
+                match args.get(2) {
+                    Some(name) => match repl::help_text(name) {
+                        Some(help) => print!("{help}"),
+                        None => {
+                            eprintln!("unknown entrypoint: {name}");
+                            std::process::exit(1);
+                        }
+                    },
+                    None => {
+                        for name in repl::entrypoint_names() {
+                            println!("{name}");
+                        }
+                    }
+                }
+            } else if command == "complete" {
+                for name in repl::complete(args.get(2).map_or("", String::as_str)) {
+                    println!("{name}");
+                }
+            } else if command == "fund-batch" {
                 let csv_path = match args.get(2) {
                     Some(path) => path,
                     None => {
