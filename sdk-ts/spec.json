@@ -92,7 +92,7 @@
     },
     {
       "name": "fund_batch",
-      "description": "Process multiple investor contributions in a single call. Max 50 entries.",
+      "description": "Process multiple investor contributions atomically in a single call; any failed entry reverts the entire batch. Max 50 entries.",
       "auth": "per-investor",
       "params": [
         { "name": "entries", "type": "Vec<(Address, i128)>", "description": "Vector of (investor_address, amount) pairs; max 50" }
@@ -128,6 +128,35 @@
       "auth": "investor",
       "params": [
         { "name": "investor", "type": "Address", "description": "Investor address recording the claim" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "claim_payout_as_delegate",
+      "description": "Active delegate records an investor payout claim after settlement.",
+      "auth": "delegate",
+      "params": [
+        { "name": "investor", "type": "Address", "description": "Investor whose payout is being claimed" },
+        { "name": "delegate", "type": "Address", "description": "Active delegate authorizing the claim" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "set_yield_claim_delegate",
+      "description": "Investor sets or replaces their yield claim delegate.",
+      "auth": "investor",
+      "params": [
+        { "name": "investor", "type": "Address", "description": "Investor authorizing the delegation" },
+        { "name": "delegate", "type": "Address", "description": "Address to authorize for claims" }
+      ],
+      "returns": { "type": "null", "description": "No return value" }
+    },
+    {
+      "name": "revoke_yield_claim_delegate",
+      "description": "Investor revokes their active yield claim delegation.",
+      "auth": "investor",
+      "params": [
+        { "name": "investor", "type": "Address", "description": "Investor authorizing revocation" }
       ],
       "returns": { "type": "null", "description": "No return value" }
     },

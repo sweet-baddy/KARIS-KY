@@ -590,6 +590,29 @@ export class EscrowClient {
     return this.invoke("claim_investor_payout", [investor], source);
   }
 
+  /** Claim an investor payout as the active delegate. Auth: delegate. */
+  async claimPayoutAsDelegate(
+    investor: string,
+    delegate: string,
+    source?: string,
+  ): Promise<void> {
+    return this.invoke("claim_payout_as_delegate", [investor, delegate], source);
+  }
+
+  /** Set or replace an investor's yield claim delegate. Auth: investor. */
+  async setYieldClaimDelegate(
+    investor: string,
+    delegate: string,
+    source?: string,
+  ): Promise<void> {
+    return this.invoke("set_yield_claim_delegate", [investor, delegate], source);
+  }
+
+  /** Revoke an investor's active yield claim delegate. Auth: investor. */
+  async revokeYieldClaimDelegate(investor: string, source?: string): Promise<void> {
+    return this.invoke("revoke_yield_claim_delegate", [investor], source);
+  }
+
   /** Record payout claims for multiple investors. Auth: per-investor. */
   async batchClaimInvestorPayouts(investors: string[], source?: string): Promise<number> {
     if (investors.length === 0) {

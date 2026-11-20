@@ -12,6 +12,12 @@ export {
 } from "./client";
 
 export {
+  filterFundingBatchForRetry,
+  type FundingBatchEntry,
+  type FundingBatchRetryState,
+} from "./batch-retry";
+
+export {
   EscrowStatus,
   ESCROW_STATUS_LABELS,
   EscrowErrorCode,

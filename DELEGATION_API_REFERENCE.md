@@ -3,8 +3,10 @@
 ## Overview
 
 This document is the API reference for yield claim delegation. For an
-investor-facing walkthrough (use cases, revocation, and CLI/SDK examples),
-see the delegation section in `investor-quick-start.md`.
+investor-facing walkthrough (use cases, revocation, and CLI examples), see the
+delegation section in `investor-quick-start.md`. For the TypeScript SDK method
+names and a complete example, see
+[`sdk-ts/examples/yield-claim-delegation.ts`](sdk-ts/examples/yield-claim-delegation.ts).
 
 ## Public Entrypoints
 
@@ -83,12 +85,12 @@ client.revoke_yield_claim_delegate(&investor);
 
 ---
 
-### 3. `claim_investor_payout_as_delegate`
+### 3. `claim_payout_as_delegate`
 
 Delegate claims an investor's payout after settlement.
 
 ```rust
-pub fn claim_investor_payout_as_delegate(
+pub fn claim_payout_as_delegate(
     env: Env,
     investor: Address,
     delegate: Address,
@@ -151,7 +153,7 @@ env.mock_auths(&[MockAuth {
     invoke: MockInvoke::Contract(..),
     ..Default::default()
 }]);
-client.claim_investor_payout_as_delegate(&investor, &delegate);
+client.claim_payout_as_delegate(&investor, &delegate);
 ```
 
 ---

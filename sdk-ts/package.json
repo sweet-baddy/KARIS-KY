@@ -14,6 +14,7 @@
     "prepublishOnly": "npm run build",
     "example": "ts-node examples/basic-usage.ts",
     "full-lifecycle": "ts-node examples/full-lifecycle.ts",
+    "delegate-example": "ts-node examples/yield-claim-delegation.ts",
     "lint": "eslint src/ examples/",
     "test": "jest --preset ts-jest"
   },

@@ -10,6 +10,7 @@ The karis-ky escrow contract emits typed Soroban contract errors, which surface 
 - [Common Error Patterns by Method](#common-error-patterns-by-method)
 - [Try/Catch Examples](#trycatch-examples)
 - [Error Recovery Strategies](#error-recovery-strategies)
+- [Atomic Batch Retry Guidance](#atomic-batch-retry-guidance)
 
 ---
 
@@ -539,6 +540,67 @@ await claimPayoutWhenEligible(client, "GINVESTOR....");
 ---
 
 ## Error Recovery Strategies
+
+### Atomic Batch Retry Guidance
+
+The `fundBatch()` (`fund_batch`) and `batchFund()` (`batch_fund`) entrypoints
+apply all funding entries in one atomic Soroban transaction: if any entry
+fails, none of that batch's changes are committed. A contract error therefore
+does not represent a partial batch. Do not retry contract errors until the
+cause is corrected.
+
+An RPC timeout or lost response is ambiguous: the transaction may have been
+committed even though the client did not receive confirmation. Before retrying,
+save each investor's contribution before submission, read those contributions
+again after the error, and reconcile with `filterFundingBatchForRetry()`. The
+helper returns the entire batch if none of its changes are present, an empty
+array if all are present, and throws if current state is inconsistent with
+either outcome. It never recommends a partial retry. Use a fresh on-chain read
+and re-evaluate if another transaction changed any of the affected positions.
+
+```typescript
+import {
+  filterFundingBatchForRetry,
+  type FundingBatchEntry,
+} from "@karis-ky/sdk";
+
+const entries: FundingBatchEntry[] = [
+  ["GINVESTOR_A...", "5000000"],
+  ["GINVESTOR_B...", "7500000"],
+];
+const investors = [...new Set(entries.map(([investor]) => investor))];
+// Before submitting the batch, take and retain this snapshot:
+const before = new Map(
+  await Promise.all(
+    investors.map(async (investor) => [
+      investor,
+      await client.getContribution(investor),
+    ] as const),
+  ),
+);
+
+// After the RPC adapter reports an ambiguous result, reconcile before retrying.
+async function reconcileAndRetryFundingBatch(): Promise<void> {
+  const current = new Map(
+    await Promise.all(
+      investors.map(async (investor) => [
+        investor,
+        await client.getContribution(investor),
+      ] as const),
+    ),
+  );
+  const retryEntries = filterFundingBatchForRetry(entries, { before, current });
+  if (retryEntries.length > 0) {
+    await client.batchFund(retryEntries);
+  }
+}
+// Call reconcileAndRetryFundingBatch() only after an ambiguous RPC result.
+```
+
+The pre-submit snapshot is required: current contribution alone cannot
+distinguish this batch from funds that were already present before it ran.
+`filterFundingBatchForRetry()` performs no RPC calls and does not retry
+automatically.
 
 ### Network Errors
 
