@@ -1,6 +1,6 @@
 // karis-ky Escrow SDK — Public API
 //
-// Re-exports all types, constants, and the client class.
+// Re-exports all types, constants, the client class, and the event parser.
 
 export {
   EscrowClient,
@@ -54,3 +54,33 @@ export {
   type CheckEscrowHealth,
   type EscrowHealth,
 } from "./types";
+
+export {
+  parseEvent,
+  type ParsedEscrowEvent,
+  type EscrowInitializedEvent,
+  type MaxUniqueInvestorsCapLoweredEvent,
+  type EscrowFundedEvent,
+  type EscrowSettledEvent,
+  type MaturityUpdatedEvent,
+  type AdminTransferredEvent,
+  type AdminProposedEvent,
+  type BeneficiaryRotatedEvent,
+  type FundingTargetUpdatedEvent,
+  type LegalHoldChangedEvent,
+  type DisputePausedEvent,
+  type DisputeResumedEvent,
+  type LegalHoldProposedEvent,
+  type CollateralRecordedEvent,
+  type SmeWithdrewEvent,
+  type InvestorPayoutClaimedEvent,
+  type FundingCancelledEvent,
+  type InvestorRefundedEvent,
+  type TreasuryDustSweptEvent,
+  type PrimaryAttestationBoundEvent,
+  type AttestationBoundEvent,
+  type AttestationDigestAppendedEvent,
+  type AllowlistEnabledChangedEvent,
+  type InvestorAllowlistChangedEvent,
+  type UnknownEvent,
+} from "./events";
