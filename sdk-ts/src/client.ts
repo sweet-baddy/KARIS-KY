@@ -23,7 +23,6 @@ import {
   type EscrowSnapshot,
   type ErrorDiagnostic,
   type EscrowTemplate,
-  type InvestorCapStatus,
   type InitParams,
   type SorobanResult,
   type EscrowEvent,
@@ -31,6 +30,9 @@ import {
   type EscrowEventSubscriptionOptions,
   type CheckEscrowHealth,
   type EscrowHealth,
+  type ContractLimits,
+  type EscrowHealthMetrics,
+  type StateInconsistencyReport,
   SCHEMA_VERSION,
   CONTRACT_INTERFACE_VERSION,
   MAX_INVOICE_ID_STRING_LEN,
@@ -454,6 +456,48 @@ export class EscrowClient {
 
   async getInvestorPosition(investor: string): Promise<InvestorPosition> {
     return this.simulate("get_investor_position", [investor]);
+  }
+
+  /**
+   * Get comprehensive escrow health metrics for dashboard displays.
+   *
+   * Returns operational metrics including funding progress percentage, days to maturity,
+   * unique investor count, average contribution size, and estimated yield payout.
+   * Suitable for monitoring dashboards and analytics.
+   *
+   * @returns EscrowHealthMetrics with funding_progress_percent, days_to_maturity,
+   *          unique_investor_count, average_contribution_size, and estimated_yield_payout.
+   */
+  async getEscrowHealthMetrics(): Promise<EscrowHealthMetrics> {
+    return this.simulate("get_escrow_health_metrics", []);
+  }
+
+  /**
+   * Detect state inconsistencies in the escrow storage.
+   *
+   * Runs a suite of invariant checks on the escrow state without modifying storage.
+   * Returns a report with boolean flags indicating any violations. All false indicates
+   * a valid state; any true flag signals a potential bug or corruption.
+   *
+   * Useful for health monitoring, audits, and debugging.
+   *
+   * @returns StateInconsistencyReport with boolean flags for each invariant violation.
+   */
+  async detectStateInconsistencies(): Promise<StateInconsistencyReport> {
+    return this.simulate("detect_state_inconsistencies", []);
+  }
+
+  /**
+   * Get the operational limits configured for this contract.
+   *
+   * Returns static limits on batch sizes, history entries, and other operational bounds.
+   * Consumers can use these to validate requests before sending (e.g., batch sizes,
+   * attestation append count, investor allowlist mutations).
+   *
+   * @returns ContractLimits with all operational limit constants.
+   */
+  async getLimits(): Promise<ContractLimits> {
+    return this.simulate("get_limits", []);
   }
 
   // ---- State-mutating entrypoints ----

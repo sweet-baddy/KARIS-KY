@@ -209,6 +209,66 @@ export interface EscrowTemplate {
   funding_deadline_days: number | null;
 }
 
+/** Operational limits returned by `get_limits`. */
+export interface ContractLimits {
+  /** Upper bound on `append_attestation_digest` entries. */
+  max_attestation_append_entries: number;
+  /** Upper bound on reinvestment audit log entries. */
+  max_reinvestment_audit_entries: number;
+  /** Upper bound on `DataKey::InvestorFundingHistory` entries per investor. */
+  max_investor_history_entries: number;
+  /** Upper bound on admin role assignments. */
+  max_admin_roles: number;
+  /** Upper bound on multisig policy signer entries. */
+  max_multisig_signers: number;
+  /** Upper bound on multisig policy operation entries. */
+  max_multisig_operations: number;
+  /** Upper bound on batch allowlist mutation entries per call. */
+  max_investor_allowlist_batch: number;
+  /** Upper bound on `fund_batch` entries per call. */
+  max_fund_batch: number;
+  /** Upper bound on batch payout claim entries. */
+  max_batch_claim: number;
+}
+
+/** Read-only dashboard metrics returned by `get_escrow_health_metrics`. */
+export interface EscrowHealthMetrics {
+  /** `(funded_amount * 100) / funding_target`, floored, capped at 100 when overfunded. */
+  funding_progress_percent: number;
+  /** Days until maturity (negative once maturity has passed); 0 when no maturity is set. */
+  days_to_maturity: string; // i64 → bigint string
+  /** Number of unique investors that have contributed. */
+  unique_investor_count: number;
+  /** `funded_amount / unique_investor_count`, or 0 when there are no investors yet. */
+  average_contribution_size: string; // i128 → bigint string
+  /** Flat coupon on the whole funded_amount; does not account for tiered per-investor yield. */
+  estimated_yield_payout: string; // i128 → bigint string
+}
+
+/** State invariant report returned by `detect_state_inconsistencies`. */
+export interface StateInconsistencyReport {
+  /** Funded amount exceeds target without status advancing from Open. */
+  funded_exceeds_target_stale: boolean;
+  /** Funded amount is positive but status is still Open. */
+  funded_positive_status_open: boolean;
+  /** Funded amount is zero but status has advanced beyond Open. */
+  funded_zero_status_advanced: boolean;
+  /** Funders exist but status is still Open and funding deadline not passed. */
+  funders_exist_status_open: boolean;
+  /** No funders recorded but status has advanced beyond Open. */
+  no_funders_advanced_status: boolean;
+  /** Funding close snapshot exists but status is not Funded or later. */
+  snapshot_exists_not_funded: boolean;
+  /** Funding close snapshot is missing but status is Funded or later. */
+  snapshot_missing_post_funded: boolean;
+  /** Escrow settled before maturity lock expiry. */
+  settled_before_maturity_lock: boolean;
+  /** Invalid funding amounts detected in investor history. */
+  invalid_funding_amounts: boolean;
+  /** Invalid or unrecognized status value. */
+  invalid_status_value: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Event streaming types
 // ---------------------------------------------------------------------------
