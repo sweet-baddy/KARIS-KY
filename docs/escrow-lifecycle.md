@@ -302,20 +302,106 @@ Status remains `1` (funded). `get_distributed_principal()` now returns `40_000`.
 Because the full outstanding principal has now been distributed, the escrow transitions
 `status 1 → 2` (settled). `get_distributed_principal()` returns `100_000`.
 
-### `get_distributed_principal`
+### Partial settlement invariants
+
+The partial settlement feature provides **incremental pro-rata distribution** of principal to
+investors. To ensure correctness and prevent mis-accounting, the following invariants are defined
+and enforced:
+
+#### Invariant 1: `get_distributed_principal()` advances monotonically
 
 `get_distributed_principal()` returns the **cumulative principal that has been distributed to
 investors so far** across all settlements (partial and final). It is the running total of every
 `partial_settle`/`settle` amount applied to principal.
 
 - Before any settlement: `0`.
-- After a partial settlement of `amount`: increases by `amount`.
+- After a partial settlement of `amount`: increases by exactly `amount`.
 - After full settlement: equals the total funded principal.
+- **Invariant:** The value is monotonically non-decreasing. Once set to `X`, it can never decrease.
+- **Invariant:** Attempting to settle an amount such that `distributed_principal + amount > funded_amount` panics.
+
+#### Invariant 2: Investor payouts across multiple partial settle + claim sequences reconcile correctly
+
+Each investor receives a **pro-rata share** of each settlement, independent of when they claim:
+
+```
+payout_i(step) = settled_amount(step) × (contribution_i / total_principal) + accrued_yield(step)
+```
+
+The **sum of all incremental payouts** (across all claim calls following multiple partial settlements)
+equals the payout from a single full settlement at the same yield:
+
+```
+sum(payout_i(step1), payout_i(step2), ..., payout_i(stepN)) = payout_i(full_settlement)
+```
+
+This holds because:
+- Each partial settlement distributes a fraction of the total principal.
+- Yield is computed on the **settled amount** only, not on the full funded amount.
+- The cumulative settled amount eventually equals the full funded amount.
+- The cumulative yield from all partial settlements equals the yield from one full settlement.
+
+#### Invariant 3: Partial claim then full settlement yields no double-counting
+
+When an investor claims a payout after a partial settlement, then another partial settlement occurs,
+the second payout includes only the **new incremental principal and yield**, not a re-distribution
+of the already-claimed portion. This is achieved by marking each investor as claimed after their
+first claim, ensuring idempotent behavior.
+
+#### Invariant 4: `claim_investor_payout()` is idempotent across all settlement states
+
+Once an investor has claimed after a settlement step, a second call to `claim_investor_payout()`
+is a **no-op** and does not emit a duplicate event. The investor's claimed flag is set to `true`
+after the first claim, and subsequent calls return early without further state mutations.
+
+#### Invariant 5: Multiple investors with equal contributions receive equal payouts
+
+For any settlement step, two investors with identical contributions receive identical payout
+amounts, subject to rounding differences in integer division. This ensures **equitable distribution**:
+
+```
+contribution_a == contribution_b  ⟹  payout_a ≈ payout_b  (within rounding tolerance)
+```
+
+#### Invariant 6: Settling beyond outstanding principal panics
+
+The sum of all partial settlements must not exceed the total funded principal:
+
+```
+sum(partial_amounts) ≤ funded_amount
+```
+
+Attempting to settle an amount that would exceed this invariant panics with
+`EscrowError::SettlementExceedsFunded`.
+
+### `get_distributed_principal`
+
+`get_distributed_principal()` is the runtime accessor for Invariant 1. It returns the
+**cumulative principal that has been distributed to investors so far** across all settlements
+(partial and final).
 
 It lets SMEs and investors verify how much principal has been released without reconstructing
 the history of settlement calls, and it is the value used to compute the remaining outstanding
 principal (`total_principal - get_distributed_principal()`) that a subsequent `partial_settle`
 may distribute.
+
+### Test coverage for partial settlement invariants
+
+The invariants are verified by comprehensive test cases in
+`escrow/src/tests/partial_settle_invariants.rs`:
+
+- **Invariant 1:** `distributed_principal_advances_through_partial_settlements()`
+- **Invariant 2:** `single_investor_partial_then_full_settlement_yields_match()`,
+  `equal_investors_receive_equal_pro_rata_shares()`,
+  `unequal_investors_receive_proportional_pro_rata_shares()`,
+  `full_reconciliation_multi_partial_then_full()`,
+  `multi_investor_full_reconciliation_partial_then_full()`
+- **Invariant 4:** `double_claim_is_idempotent()`,
+  `investor_accumulates_claims_across_partial_settlements()`
+- **Invariant 6:** `settle_beyond_outstanding_principal_panics()`
+
+Each test sets up a fresh escrow, executes one or more partial settlements, investor claims,
+and verifies the payout invariants hold end-to-end.
 
 ---
 
