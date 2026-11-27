@@ -100,6 +100,34 @@ fn fund_settle_and_return_investor(
 // Init validation
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// Threshold of 1 bps (0.01%) is the minimum valid non-zero threshold.
+#[test]
+fn init_accepts_minimum_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+
+    // 1 bps is valid and enables detection
+    init_with_slippage_threshold(&client, &env, &admin, &sme, 800i64, 1i64);
+
+    let threshold = client.get_yield_slippage_threshold();
+    assert_eq!(threshold, 1i64, "minimum threshold of 1 bps should be stored");
+}
+
+/// Threshold of 9_999 bps is valid (99.99%).
+#[test]
+fn init_accepts_threshold_just_below_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+
+    // 9_999 bps is valid
+    init_with_slippage_threshold(&client, &env, &admin, &sme, 800i64, 9_999i64);
+
+    let threshold = client.get_yield_slippage_threshold();
+    assert_eq!(threshold, 9_999i64, "threshold of 9_999 bps should be stored");
+}
+
 /// Threshold must be within valid range (0..=10_000 bps).
 #[test]
 #[should_panic]
@@ -295,7 +323,49 @@ fn claim_with_excessive_slippage_emits_warning() {
 // Slippage detection edge cases
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// When deviation is just below threshold, warning is not emitted.
+/// Base: 800 bps, Actual: 999 bps, Deviation: 199 bps, Threshold: 200 bps
+/// Result: 199 <= 200 ⟹ No warning
+#[test]
+fn claim_with_deviation_just_below_threshold_no_warning() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+
+    let base_yield = 800i64;
+    let threshold = 200i64;
+    let mut tiers = Vec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 0u64,
+        yield_bps: 999i64, // Deviation of 199 bps < threshold of 200 bps
+    });
+
+    init_with_tiers_and_slippage(&client, &env, &admin, &sme, base_yield, tiers, threshold);
+
+    let investor = Address::generate(&env);
+    client.fund_with_commitment(&investor, &TARGET, &0u64);
+    client.settle();
+    client.claim_investor_payout(&investor);
+
+    let events = env.events().all();
+    let slippage_events: Vec<_> = events
+        .events()
+        .iter()
+        .filter(|evt| evt.topics.get(0).map_or(false, |t| {
+            t.to_string().contains("yield_slip")
+        }))
+        .collect();
+
+    assert_eq!(
+        slippage_events.len(),
+        0,
+        "no warning when deviation is below threshold"
+    );
+}
+
 /// When deviation exactly equals threshold, warning is **not** emitted (requires > threshold).
+/// Base: 800 bps, Actual: 1000 bps, Deviation: 200 bps, Threshold: 200 bps
+/// Result: 200 == 200 ⟹ No warning (boundary condition)
 #[test]
 fn claim_with_deviation_equal_to_threshold_no_warning() {
     let env = Env::default();
@@ -334,6 +404,8 @@ fn claim_with_deviation_equal_to_threshold_no_warning() {
 }
 
 /// When deviation is just above threshold, warning is emitted.
+/// Base: 800 bps, Actual: 1001 bps, Deviation: 201 bps, Threshold: 200 bps
+/// Result: 201 > 200 ⟹ Warning emitted (boundary + 1)
 #[test]
 fn claim_with_deviation_above_threshold_emits_warning() {
     let env = Env::default();
@@ -368,6 +440,86 @@ fn claim_with_deviation_above_threshold_emits_warning() {
         slippage_events.len(),
         1,
         "warning should be emitted when deviation just exceeds threshold"
+    );
+}
+
+/// Minimum non-zero threshold (1 bps) with minimal slippage just above it triggers warning.
+/// Base: 800 bps, Actual: 802 bps, Deviation: 2 bps, Threshold: 1 bps
+/// Result: 2 > 1 ⟹ Warning emitted (minimum threshold test)
+#[test]
+fn claim_with_minimum_threshold_and_slight_deviation_emits_warning() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+
+    let base_yield = 800i64;
+    let threshold = 1i64;  // Minimum non-zero threshold
+    let mut tiers = Vec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 0u64,
+        yield_bps: 802i64, // Deviation of 2 bps > threshold of 1 bps
+    });
+
+    init_with_tiers_and_slippage(&client, &env, &admin, &sme, base_yield, tiers, threshold);
+
+    let investor = Address::generate(&env);
+    client.fund_with_commitment(&investor, &TARGET, &0u64);
+    client.settle();
+    client.claim_investor_payout(&investor);
+
+    let events = env.events().all();
+    let slippage_events: Vec<_> = events
+        .events()
+        .iter()
+        .filter(|evt| evt.topics.get(0).map_or(false, |t| {
+            t.to_string().contains("yield_slip")
+        }))
+        .collect();
+
+    assert_eq!(
+        slippage_events.len(),
+        1,
+        "warning should be emitted with minimum threshold (1 bps) when slippage exceeds it"
+    );
+}
+
+/// Maximum threshold (10_000 bps = 100%) allows any deviation without warning.
+/// Base: 800 bps, Actual: 10_000 bps, Deviation: 9_200 bps, Threshold: 10_000 bps
+/// Result: 9_200 <= 10_000 ⟹ No warning (maximum threshold disables practical detection)
+#[test]
+fn claim_with_maximum_threshold_no_warning() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+
+    let base_yield = 800i64;
+    let threshold = 10_000i64;  // Maximum threshold (100%)
+    let mut tiers = Vec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 0u64,
+        yield_bps: 10_000i64, // Deviation of 9_200 bps, still under max threshold
+    });
+
+    init_with_tiers_and_slippage(&client, &env, &admin, &sme, base_yield, tiers, threshold);
+
+    let investor = Address::generate(&env);
+    client.fund_with_commitment(&investor, &TARGET, &0u64);
+    client.settle();
+    client.claim_investor_payout(&investor);
+
+    let events = env.events().all();
+    let slippage_events: Vec<_> = events
+        .events()
+        .iter()
+        .filter(|evt| evt.topics.get(0).map_or(false, |t| {
+            t.to_string().contains("yield_slip")
+        }))
+        .collect();
+
+    assert_eq!(
+        slippage_events.len(),
+        0,
+        "maximum threshold (100%) should not emit warnings for any deviation"
     );
 }
 

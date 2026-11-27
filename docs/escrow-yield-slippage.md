@@ -39,10 +39,42 @@ pub fn init(
 - If provided, must be in range `0..=10_000` basis points (0% to 100%)
 - `0` or `None` disables slippage detection entirely (default)
 - Value is **immutable** after initialization
+- Values at boundaries have specific behavior:
+  - **0 (disabled)**: No slippage check runs; detection is entirely disabled
+  - **1–9999 (enabled, variable strictness)**: Deviation must be strictly greater than threshold to trigger warning
+  - **10,000 (100%, effectively disabled)**: Any deviation ≤ 10,000 bps passes; functionally disables detection
 
 **Storage**:
 - Stored in [`DataKey::YieldSlippageThreshold`](../escrow/src/lib.rs)
 - Persisted as instance storage (accessible across all investor claims)
+
+### Threshold Boundary Semantics
+
+The threshold comparison is **strictly greater than** (`deviation > threshold`):
+
+| Deviation | Threshold | Comparison | Action |
+|-----------|-----------|------------|--------|
+| 100 bps | 100 bps | 100 > 100? NO | No warning |
+| 101 bps | 100 bps | 101 > 100? YES | Emit warning |
+| 199 bps | 200 bps | 199 > 200? NO | No warning |
+| 200 bps | 200 bps | 200 > 200? NO | No warning |
+| 201 bps | 200 bps | 201 > 200? YES | Emit warning |
+
+**Key implications**:
+- Deviation must **exceed** the threshold, not equal it
+- Off-by-one edge case: `threshold = 200` blocks warnings at exactly 200 bps but not 199 bps
+- Minimum meaningful threshold: `1` bps (any deviation ≥ 2 bps triggers warning)
+- Maximum meaningful threshold: `9_999` bps (10_000 bps would never trigger since max deviation is 9_200 bps)
+
+### Practical Configuration Guidance
+
+| Threshold | Use Case | Behavior |
+|-----------|----------|----------|
+| **0 or None** | No monitoring | Skips all checks; fastest code path |
+| **1** | Paranoid monitoring | Any positive deviation triggers warning |
+| **50–200** | Conservative | Catches small to moderate deviations |
+| **500–1_000** | Moderate | Catches larger deviations (5%–10%) |
+| **10_000** | Disabled (alternative) | Equivalent to 0 but explicit in config |
 
 ### Slippage Calculation
 
@@ -204,16 +236,48 @@ client.init(
 
 Comprehensive test suite in [`escrow/src/tests/yield_slippage.rs`](../escrow/src/tests/yield_slippage.rs):
 
-- **Validation**: threshold bounds, zero/max values
-- **Query functions**: `get_yield_slippage_threshold`, `get_investor_yield_slippage`
-- **Detection**: with/without deviation, disabled detection
-- **Edge cases**: deviation exactly at threshold, just above/below
-- **Idempotency**: second claim does not re-emit
+### Initialization & Configuration Tests
+
+- `init_accepts_zero_threshold`: Zero threshold disables detection
+- `init_accepts_minimum_threshold`: Minimum non-zero threshold (1 bps) is valid
+- `init_accepts_threshold_just_below_max`: 9_999 bps is valid
+- `init_accepts_max_threshold`: Maximum threshold (10_000 bps = 100%) is valid
+- `init_rejects_threshold_above_max`: Values > 10_000 bps are rejected with error 163
+- `get_threshold_returns_configured_value`: Query function returns set value
+- `get_threshold_returns_zero_when_unconfigured`: Unset threshold defaults to 0
+- `get_investor_yield_slippage_returns_correct_values`: Slippage computation is correct
+
+### Claim Behavior Tests
+
+- `claim_with_disabled_slippage_detection`: Threshold = 0 skips checks (no event)
+- `claim_with_matching_yields_no_warning`: Zero deviation never warns
+- `claim_with_deviation_just_below_threshold_no_warning`: (199 <= 200) ⟹ No warning
+- `claim_with_deviation_equal_to_threshold_no_warning`: (200 == 200) ⟹ No warning
+- `claim_with_deviation_just_above_threshold_emits_warning`: (201 > 200) ⟹ Warning
+- `claim_with_minimum_threshold_and_slight_deviation_emits_warning`: (2 > 1) ⟹ Warning at minimum
+- `claim_with_maximum_threshold_no_warning`: 10_000 bps threshold never warns
+- `claim_with_excessive_slippage_emits_warning`: Large deviation always warns
+- `claim_idempotency_no_duplicate_warnings`: Repeated claims don't re-emit events
+
+### Key Test Boundaries
+
+| Test | Threshold | Deviation | Expected |
+|------|-----------|-----------|----------|
+| below | 200 | 199 | ✓ No warning |
+| at | 200 | 200 | ✓ No warning |
+| above | 200 | 201 | ✓ Warning |
+| minimum | 1 | 2 | ✓ Warning |
+| maximum | 10_000 | 9_200 | ✓ No warning |
 
 Run tests:
 ```bash
 cd escrow
 cargo test yield_slippage --lib
+```
+
+For coverage report:
+```bash
+cargo llvm-cov --package karis_ky_escrow --lib yield_slippage
 ```
 
 ## Integration Checklist
