@@ -55,6 +55,7 @@ mod dos_analysis;
 mod event_schema_conformance;
 mod external_calls;
 mod external_calls_mocked;
+mod fee_collection;
 mod funding;
 mod get_limits;
 mod health_and_events;

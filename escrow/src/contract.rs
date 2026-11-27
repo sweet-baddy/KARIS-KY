@@ -595,8 +595,25 @@ impl LiquifactEscrow {
     }
 
     /// Returns the configured protocol fee percentage in basis points, or `0` if
-    /// no fee was configured at init. Applied to the gross yield coupon at settlement;
-    /// the fee is transferred to treasury.
+    /// no fee was configured at init.
+    ///
+    /// # Fee Basis
+    /// The fee is applied **to the gross yield coupon only**, never to principal.
+    /// Formula at settlement: `fee_amount = (gross_coupon * fee_percentage) / 10_000`
+    /// where `gross_coupon = (settlement_basis * yield_bps) / 10_000`.
+    ///
+    /// # Application Point
+    /// Applied during [`LiquifactEscrow::settle`] when status transitions to 2 (settled).
+    /// The fee is computed on the settlement-specified amount and transferred to the treasury
+    /// address. The net coupon (after fee deduction) is available for investor claims.
+    ///
+    /// # Configuration
+    /// Set once at [`LiquifactEscrow::init`]; immutable thereafter. Only the admin can set it;
+    /// it is not changed by settlement, yield distribution, or other runtime operations.
+    ///
+    /// # Treasury Accountability
+    /// The treasury receives the fee amount in a separate token transfer with event emission
+    /// ([`ProtocolFeeCollected`]), enabling clear reconciliation for financial reporting.
     pub fn get_fee_percentage(env: Env) -> i64 {
         Self::get_fee_percentage_impl(env)
     }

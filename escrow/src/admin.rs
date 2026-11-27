@@ -817,8 +817,21 @@ impl LiquifactEscrow {
     }
 
     /// Returns the configured protocol fee percentage in basis points, or `0` if
-    /// no fee was configured at init. Applied to the gross yield coupon at settlement;
-    /// the fee is transferred to treasury.
+    /// no fee was configured at init.
+    ///
+    /// # Fee Basis
+    /// The fee is applied **to the gross yield coupon only**, never to principal.
+    /// Formula at settlement: `fee_amount = (gross_coupon * fee_percentage) / 10_000`
+    /// where `gross_coupon = (settlement_basis * yield_bps) / 10_000`.
+    ///
+    /// # Application Point
+    /// Applied during [`LiquifactEscrow::settle`] when the escrow transitions to status 2 (settled).
+    /// The fee is deducted from yield before investor claims are computed.
+    /// A [`ProtocolFeeCollected`] event is emitted with full fee accounting (gross coupon,
+    /// fee percentage, fee amount, and net coupon).
+    ///
+    /// # Storage
+    /// Stored in [`DataKey::FeePercentage`]; immutable after init.
     pub(crate) fn get_fee_percentage_impl(env: Env) -> i64 {
         env.storage()
             .instance()
